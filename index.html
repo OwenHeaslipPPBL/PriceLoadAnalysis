@@ -4940,9 +4940,21 @@ function tripStatus(tix, schedule, dateISO){
   }
 
   // ── 3. Tix-only fallback (past trips, unscraped routes) ──
-  doubled = (tix||0) > DOUBLED_THRESHOLD_TIX;
+  // CONSERVATIVE: do NOT infer doubled from tix alone. On multi-stop routes
+  // (PABT->Worcester->Hartford->Springfield->BOS, etc.) a single 54-seater
+  // routinely accumulates 60-100 tix via on/off passengers without ever
+  // being doubled. The old `tix > 56 → doubled` heuristic produced false
+  // positives that halved RPM on those trips (since effCap doubled). Ops
+  // mgr complaint 2026-06-09 confirmed the bug on Sun 6/7 BOS routes.
+  //
+  // Past trips and unscraped routes now show doubled=false unless we have
+  // authoritative DCC dispatch data confirming it. The DCC pull only covers
+  // today+42d, so past trips fall into this fallback as soon as the next
+  // day's pipeline runs. Longer-term fix: archive DCC daily so historical
+  // doubled status is preserved.
+  doubled = false;
   soldOut = (tix||0) >= SOLDOUT_CAP;
-  source  = 'tix-fallback';
+  source  = 'tix-fallback-conservative';
   return { doubled, soldOut, source };
 }
 
