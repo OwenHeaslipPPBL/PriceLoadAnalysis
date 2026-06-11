@@ -6836,6 +6836,29 @@ function loadFu(){
   return __fu;
 }
 
+// Custom hover tooltip — reuses the #od-tip box + posODTip()/hideODTip() (the same
+// styled tooltip used on Loads/Suggestions), NOT native title= attributes.
+window.FU_TT = {
+  total:{t:'Total Fleet (active)',b:'GPS-tracked MCI coaches in Saucon that ran at least once in the last 90 days. Dormant buses (no movement in 90 days &mdash; sold or stored but still in Saucon) are excluded so they don&rsquo;t inflate the slack. Source: Saucon telematics roster.'},
+  oos:{t:'Out of Service',b:'Buses currently flagged O/S on the garage status boards &mdash; today&rsquo;s live snapshot. A 7-day average builds as we capture the boards daily. Source: shared garage ops Google Sheet.'},
+  util:{t:'Utilized',b:'Buses that ran more than 25 miles on at least one day in the selected period. A bus that ran only Friday still counts &mdash; it was needed. Source: Saucon daily mileage.'},
+  anu:{t:'Available &middot; Not Utilized',b:'The CEO&rsquo;s key metric: buses available but NOT used &mdash; ran zero days in the period AND not out of service. This is the genuine slack to reassign or shed. Source: Saucon mileage + garage-board status.'},
+  mpbd:{t:'Fleet mi / bus / day',b:'Average intensity = total active-fleet miles &divide; (active buses &times; days in period). Each division&rsquo;s fat/lean Index is its own mi/bus/day &divide; this fleet average.'},
+  c_total:{t:'Total',b:'Active buses assigned to this division (Home Base).'},
+  c_oos:{t:'Out of Service',b:'Buses from this division currently flagged O/S on the garage boards. &#9888; marks a division with more than 25% of its fleet down.'},
+  c_util:{t:'Utilized',b:'Division buses that ran more than 25 miles on at least one day in the period.'},
+  c_anu:{t:'Available &middot; Idle',b:'Available but NOT used &mdash; ran zero days AND not out of service. The division&rsquo;s slack.'},
+  c_mpbd:{t:'mi / Bus &middot; Day',b:'Division miles &divide; (its buses &times; days in period). Average usage intensity.'},
+  c_index:{t:'Utilization Index',b:'Division mi/bus/day &divide; the fleet average. Below 0.80 = Fat (under-using its buses); above 1.20 = Lean (working its fleet hard).'},
+  c_verdict:{t:'Verdict',b:'Fat (index &lt;0.80) &middot; Balanced &middot; Lean (index &gt;1.20), from the utilization index above.'}
+};
+function fuTip(ev, key){
+  const tip=document.getElementById('od-tip'); if(!tip) return;
+  const o=(window.FU_TT||{})[key]||{};
+  tip.innerHTML=`<div class="od-head">${o.t||''}</div><div style="max-width:340px;line-height:1.6;color:var(--text2);font-size:11.5px;white-space:normal">${o.b||''}</div>`;
+  tip.classList.add('show'); posODTip(ev);
+}
+
 // date helpers
 function fuDateLabel(iso){const d=new Date(iso+'T00:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
 function fuShort(iso){const d=new Date(iso+'T00:00:00');return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});}
@@ -6937,22 +6960,15 @@ function renderFleet(){
   const utilPct=F.total?Math.round(100*F.utilized/F.total):0;
 
   // ── Hero KPIs — the CEO's four (available-not-utilized featured) ──
-  const TT={
-    total:'Total active fleet = GPS-tracked MCI coaches in Saucon that ran at least once in the last 90 days. Dormant buses (no movement in 90 days, e.g. sold or stored but still in Saucon) are excluded so they do not inflate the slack. Source: Saucon telematics roster.',
-    oos:'Buses currently flagged O/S (out of service) on the garage status boards. This is today\u2019s live snapshot; a 7-day average builds as we capture the boards daily. Source: shared garage ops Google Sheet.',
-    util:'Buses that ran more than 25 miles on at least one day in the selected period. A bus that ran only Friday still counts (it was needed). Source: Saucon daily mileage.',
-    anu:'The CEO key metric: buses available but NOT used \u2014 ran zero days in the period AND not currently out of service. This is the genuine slack. Source: Saucon mileage + garage-board status.',
-    mpbd:'Average intensity = total active-fleet miles divided by (active buses x days in period). Each division\u2019s fat/lean Index is its own mi/bus/day divided by this fleet average.'};
-  const esc=s=>(s||'').replace(/"/g,'&quot;');
-  const kpi=(label,val,cls,note,tip)=>`<div class="mkpi" title="${esc(tip)}"><div class="mkpi-label">${label}</div><div class="mkpi-val ${cls||''}">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
-  const featured=(label,val,note,tip)=>`<div class="mkpi" title="${esc(tip)}" style="border:1px solid var(--cream);border-radius:8px;background:rgba(212,196,168,.06)"><div class="mkpi-label" style="color:var(--cream)">${label}</div><div class="mkpi-val cream">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
+  const kpi=(label,val,cls,note,key)=>`<div class="mkpi" style="cursor:help" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label">${label}</div><div class="mkpi-val ${cls||''}">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
+  const featured=(label,val,note,key)=>`<div class="mkpi" style="cursor:help;border:1px solid var(--cream);border-radius:8px;background:rgba(212,196,168,.06)" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label" style="color:var(--cream)">${label}</div><div class="mkpi-val cream">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
   const dormN=(loadFu().dormant_buses||[]).length;
   document.getElementById('fuKpis').innerHTML=
-    kpi('Total Fleet',F.total,'',(dormN?dormN+' dormant excluded':'active GPS coaches'),TT.total)+
-    kpi('Out of Service',F.oos,F.oos?'red':'', 'on the boards now',TT.oos)+
-    kpi('Utilized',`${F.utilized} <span style="font-size:13px;font-weight:600;color:var(--text3)">(${utilPct}%)</span>`,_fuPctClass(utilPct),'ran in this period',TT.util)+
-    featured('Available · Not Utilized',F.availNotUtil,'NOT used &mdash; the slack',TT.anu)+
-    kpi('Fleet mi/bus/day',Math.round(F.mpbd).toLocaleString(),'cream','avg intensity',TT.mpbd);
+    kpi('Total Fleet',F.total,'',(dormN?dormN+' dormant excluded':'active GPS coaches'),'total')+
+    kpi('Out of Service',F.oos,F.oos?'red':'', 'on the boards now','oos')+
+    kpi('Utilized',`${F.utilized} <span style="font-size:13px;font-weight:600;color:var(--text3)">(${utilPct}%)</span>`,_fuPctClass(utilPct),'ran in this period','util')+
+    featured('Available · Not Utilized',F.availNotUtil,'NOT used &mdash; the slack','anu')+
+    kpi('Fleet mi/bus/day',Math.round(F.mpbd).toLocaleString(),'cream','avg intensity','mpbd');
 
   // period note + stamp
   const histNote = (d.oos_history_days<7)?` &middot; <span style="color:var(--text3)">O/S = today's count; 7-day average builds over ${7-d.oos_history_days} more day(s) of capture</span>`:'';
@@ -6973,16 +6989,16 @@ function renderFuDivTable(C, d){
   const rows=Object.entries(C.byDiv).filter(([div])=>div!=='Unassigned')
     .sort((a,b)=>a[1].idxT-b[1].idxT)
     .map(([div,m])=>{
-      const small=m.total<=4?' <span style="color:var(--text3);font-size:10px" title="small fleet — a single idle bus swings the %">(small)</span>':'';
+      const small='';
       const oosHigh=m.total&&(m.oos/m.total)>0.25;
-      const oosCell=m.oos?`<span style="color:${oosHigh?'var(--bad)':'var(--text2)'};font-weight:${oosHigh?'700':'400'}">${m.oos}</span>${oosHigh?' <span title="high out-of-service" style="color:var(--bad)">&#9888;</span>':''}`:`<span style="color:var(--text3)">0</span>`;
+      const oosCell=m.oos?`<span style="color:${oosHigh?'var(--bad)':'var(--text2)'};font-weight:${oosHigh?'700':'400'}">${m.oos}</span>${oosHigh?' <span style="color:var(--bad)">&#9888;</span>':''}`:`<span style="color:var(--text3)">0</span>`;
       const anu=m.availNotUtil?`<span style="color:var(--cream);font-weight:600">${m.availNotUtil}</span>`:`<span style="color:var(--text3)">0</span>`;
       const td='padding:8px 10px;border-bottom:1px solid var(--border)';
       const tdr=td+';text-align:right;font-family:\'JetBrains Mono\',monospace';
       return `<tr><td style="${td}"><strong>${div}</strong>${small}</td><td style="${tdr}">${m.total}</td><td style="${tdr}">${oosCell}</td><td style="${tdr}">${m.utilized}</td><td style="${tdr}">${anu}</td><td style="${tdr}">${Math.round(m.mpbd).toLocaleString()}</td><td style="${td};width:150px">${idxBar(m.idxT)}</td><td style="${td};text-align:center">${vBadge(m.verdict)}</td></tr>`;
     }).join('');
-  const th=(t,al,tip)=>`<th title="${tip||''}" style="padding:8px 10px;text-align:${al};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${t}</th>`;
-  document.getElementById('fuDivTable').innerHTML=`<thead><tr style="background:var(--surface);border-bottom:1px solid var(--border2)">${th('Division','left')}${th('Total','right','buses assigned (Home Base)')}${th('O/S','right','out of service now')}${th('Utilized','right','ran in this period')}${th('Avail&middot;Idle','right','available but NOT used — the slack')}${th('mi/Bus&middot;Day','right')}${th('Index','left','vs fleet avg')}${th('Verdict','center')}</tr></thead><tbody>${rows}</tbody>`;
+  const th=(t,al,key)=>`<th${key?` onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"`:''} style="cursor:${key?'help':'default'};padding:8px 10px;text-align:${al};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${t}</th>`;
+  document.getElementById('fuDivTable').innerHTML=`<thead><tr style="background:var(--surface);border-bottom:1px solid var(--border2)">${th('Division','left')}${th('Total','right','c_total')}${th('O/S','right','c_oos')}${th('Utilized','right','c_util')}${th('Avail&middot;Idle','right','c_anu')}${th('mi/Bus&middot;Day','right','c_mpbd')}${th('Index','left','c_index')}${th('Verdict','center','c_verdict')}</tr></thead><tbody>${rows}</tbody>`;
 }
 
 function renderFuBusTable(C, d, period){
