@@ -4911,6 +4911,12 @@ function loadFares(p){
 // can be dropped.
 let fareLookup = {};
 let opsLookup  = {};   // populated from <script id="pp-opsdash"> at boot
+// ── Fleet Utilization state — declared HERE (early) so it is initialized before
+// the auto-load calls loadDash -> renderFleet. If these live later in the file,
+// renderFleet throws (const TDZ / undefined var) and the Fleet tab never reveals.
+// PUBLISH SWITCH: FLEET_TAB_PUBLISHED=false hides the tab on the live site (?fleet=1 previews).
+var FLEET_TAB_PUBLISHED = true;
+var __fu = null, __fuView = 'r7', __fuPeriodIdx = 0, __fuRowFilter = 'all', __fuBusSort = {col:'miles', dir:-1};
 const SOLDOUT_CAP = 54;
 const DOUBLED_THRESHOLD_TIX   = 56;   // tix-only signal: definitive doubled
 const DOUBLED_THRESHOLD_TOTAL = 95;   // fare-aware: bookable capacity near doubled (108)
@@ -6820,14 +6826,8 @@ async function mfSubmit(){
 // from process_saucon.py; EVERY metric is computed here by fuCompute() so the
 // period selector is fully flexible with one metric implementation.
 
-// PUBLISH SWITCH — hide the tab on the live site until Owen signs off. ?fleet=1 previews.
-const FLEET_TAB_PUBLISHED = true;
-
-var __fu = null;            // parsed pp-fleet payload
-var __fuView = 'r7';        // r7 | day | week | month
-var __fuPeriodIdx = 0;      // index within the current view's period list (0 = most recent)
-var __fuRowFilter = 'all';  // all | util | idle | oos
-var __fuBusSort = {col:'miles', dir:-1};  // per-bus table sort (dir: 1 asc, -1 desc)
+// Fleet Utilization state vars are declared EARLY (near opsLookup) so they're
+// initialized before the auto-load runs loadDash -> renderFleet. (TDZ fix 2026-06-11.)
 
 function loadFu(){
   if (__fu != null) return __fu;
