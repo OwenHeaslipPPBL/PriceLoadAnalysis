@@ -6827,6 +6827,7 @@ var __fu = null;            // parsed pp-fleet payload
 var __fuView = 'r7';        // r7 | day | week | month
 var __fuPeriodIdx = 0;      // index within the current view's period list (0 = most recent)
 var __fuRowFilter = 'all';  // all | util | idle | oos
+var __fuBusSort = {col:'miles', dir:-1};  // per-bus table sort (dir: 1 asc, -1 desc)
 
 function loadFu(){
   if (__fu != null) return __fu;
@@ -6856,7 +6857,19 @@ function fuTip(ev, key){
   const tip=document.getElementById('od-tip'); if(!tip) return;
   const o=(window.FU_TT||{})[key]||{};
   tip.innerHTML=`<div class="od-head">${o.t||''}</div><div style="max-width:340px;line-height:1.6;color:var(--text2);font-size:11.5px;white-space:normal">${o.b||''}</div>`;
-  tip.classList.add('show'); posODTip(ev);
+  tip.classList.add('show');
+  // Anchor BELOW the hovered element (flip above if no room) so the tooltip never
+  // covers the card/column you're reading about.
+  const el=ev&&ev.currentTarget&&ev.currentTarget.getBoundingClientRect?ev.currentTarget:null;
+  const tw=tip.offsetWidth||320, th=tip.offsetHeight||120, M=8;
+  let x, y;
+  if(el){ const r=el.getBoundingClientRect();
+    x=r.left; y=r.bottom+10;
+    if(y+th>window.innerHeight-M) y=r.top-th-10;        // flip above the element
+    if(x+tw>window.innerWidth-M) x=window.innerWidth-tw-M;
+  } else { x=(ev?ev.clientX:0)+16; y=(ev?ev.clientY:0)+18; }
+  if(x<M)x=M; if(y<M)y=M;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
 }
 
 // date helpers
@@ -6928,6 +6941,7 @@ function fuCompute(indices){
 function setFuView(v,btn){__fuView=v;__fuPeriodIdx=0;btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn));renderFleet();}
 function setFuPeriod(i){__fuPeriodIdx=+i;renderFleet();}
 function setFuRowFilter(m,btn){__fuRowFilter=m;btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn));renderFleet();}
+function setFuBusSort(col){ if(__fuBusSort.col===col){__fuBusSort.dir*=-1;} else {__fuBusSort={col, dir:(col==='miles'||col==='daysRun')?-1:1};} renderFleet(); }
 
 function _fuPctClass(p){return p>=60?'green':p>=35?'yellow':'red';}
 
@@ -7007,25 +7021,35 @@ function renderFuBusTable(C, d, period){
   const rows=roster.filter(b=>b.division!=='Unassigned').map(b=>{
     const miles=idx.reduce((s,i)=>s+(((panel[b.name]||[])[i])||0),0);
     const daysRun=idx.filter(i=>((panel[b.name]||[])[i]||0)>(d.threshold_miles||25)).length;
-    const util=daysRun>0;
-    const oos=b.status_now==='O/S';
+    const util=daysRun>0; const oos=b.status_now==='O/S';
     return {name:b.name,division:b.division,status:b.status_now||'',miles,daysRun,util,oos,
-            year:b.year,make:b.make,model:b.model};
+            year:b.year,make:b.make,model:b.model,
+            vehicle:`${b.year||''} ${b.make||''} ${b.model||''}`.trim(),
+            state:oos?'O/S':util?'used':'idle'};
   });
   let f=rows;
   if(__fuRowFilter==='util')f=rows.filter(r=>r.util);
   else if(__fuRowFilter==='idle')f=rows.filter(r=>!r.util&&!r.oos);
   else if(__fuRowFilter==='oos')f=rows.filter(r=>r.oos);
-  f.sort((a,b)=>b.miles-a.miles);
+  // Dynamic sort by the selected column.
+  const sc=__fuBusSort.col, dir=__fuBusSort.dir, numCols={miles:1,daysRun:1};
+  f.sort((a,b)=>{
+    if(sc==='name'){const an=parseInt(a.name,10),bn=parseInt(b.name,10);
+      if(!isNaN(an)&&!isNaN(bn))return (an-bn)*dir;
+      return String(a.name).localeCompare(String(b.name))*dir;}
+    if(numCols[sc])return ((a[sc]||0)-(b[sc]||0))*dir;
+    return String(a[sc]||'').localeCompare(String(b[sc]||''))*dir;
+  });
   const td='padding:6px 8px;border-bottom:1px solid var(--border)';
   const tdr=td+';text-align:right;font-family:\'JetBrains Mono\',monospace';
   const statusBadge=s=>{if(s==='O/S')return '<span style="color:var(--bad)">O/S</span>';if(s==='Hold')return '<span style="color:var(--yellow)">Hold</span>';if(s==='Ready')return '<span style="color:var(--text3)">Ready</span>';return '<span style="color:var(--text3)">&mdash;</span>';};
   const body=f.map(r=>{
     const usedTag=r.oos?'<span style="color:var(--bad)">&#9679; O/S</span>':r.util?'<span style="color:var(--good)">&#9679; used</span>':'<span style="color:var(--cream)">&#9675; idle</span>';
-    return `<tr><td style="${td}"><strong>${r.name}</strong></td><td style="${td}">${r.division}</td><td style="${tdr}">${r.miles.toFixed(0)}</td><td style="${tdr}">${r.daysRun}/${C.ndays}</td><td style="${td};text-align:center">${statusBadge(r.status)}</td><td style="${td};color:var(--text3);font-size:11px">${(r.year||'')} ${(r.make||'')} ${(r.model||'')}</td><td style="${td};text-align:center">${usedTag}</td></tr>`;
+    return `<tr><td style="${td}"><strong>${r.name}</strong></td><td style="${td}">${r.division}</td><td style="${tdr}">${r.miles.toFixed(0)}</td><td style="${tdr}">${r.daysRun}/${C.ndays}</td><td style="${td};text-align:center">${statusBadge(r.status)}</td><td style="${td};color:var(--text3);font-size:11px">${r.vehicle}</td><td style="${td};text-align:center">${usedTag}</td></tr>`;
   }).join('');
-  const th=(t,al)=>`<th style="padding:8px;text-align:${al};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${t}</th>`;
-  document.getElementById('fuBusTable').innerHTML=`<thead><tr style="background:var(--surface);border-bottom:1px solid var(--border2);position:sticky;top:0">${th('Bus','left')}${th('Division','left')}${th('Miles','right')}${th('Days run','right')}${th('Status','center')}${th('Vehicle','left')}${th('','center')}</tr></thead><tbody>${body}</tbody>`;
+  const sa=col=>__fuBusSort.col===col?(__fuBusSort.dir<0?' \u25Be':' \u25b4'):'';
+  const th=(t,al,col)=>`<th onclick="setFuBusSort('${col}')" title="Sort by ${t||'status'}" style="cursor:pointer;user-select:none;padding:8px;text-align:${al};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${t}${sa(col)}</th>`;
+  document.getElementById('fuBusTable').innerHTML=`<thead><tr style="background:var(--surface);border-bottom:1px solid var(--border2);position:sticky;top:0">${th('Bus','left','name')}${th('Division','left','division')}${th('Miles','right','miles')}${th('Days run','right','daysRun')}${th('Status','center','status')}${th('Vehicle','left','vehicle')}${th('Use','center','state')}</tr></thead><tbody>${body}</tbody>`;
 }
 
 </script>
