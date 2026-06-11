@@ -6842,7 +6842,7 @@ function loadFu(){
 window.FU_TT = {
   total:{t:'Total Fleet (active)',b:'GPS-tracked MCI coaches in Saucon that ran at least once in the last 90 days. Dormant buses (no movement in 90 days &mdash; sold or stored but still in Saucon) are excluded so they don&rsquo;t inflate the slack. Source: Saucon telematics roster.'},
   oos:{t:'Out of Service',b:'Buses currently flagged O/S on the garage status boards &mdash; today&rsquo;s live snapshot. A 7-day average builds as we capture the boards daily. Source: shared garage ops Google Sheet.'},
-  util:{t:'Utilized',b:'Buses that ran more than 25 miles on at least one day in the selected period. A bus that ran only Friday still counts &mdash; it was needed. Source: Saucon daily mileage.'},
+  util:{t:'Utilized',b:'Buses that ran more than 25 miles on at least one day in the period AND are currently available. A bus that ran earlier but is in the shop now counts under Out of Service instead, so the four numbers add up to the total fleet. Source: Saucon mileage + garage-board status.'},
   anu:{t:'Available &middot; Not Utilized',b:'The CEO&rsquo;s key metric: buses available but NOT used &mdash; ran zero days in the period AND not out of service. This is the genuine slack to reassign or shed. Source: Saucon mileage + garage-board status.'},
   mpbd:{t:'Fleet mi / bus / day',b:'Average intensity = total active-fleet miles &divide; (active buses &times; days in period). Each division&rsquo;s fat/lean Index is its own mi/bus/day &divide; this fleet average.'},
   c_total:{t:'Total',b:'Active buses assigned to this division (Home Base).'},
@@ -6918,7 +6918,9 @@ function fuCompute(indices){
     const buses=byDiv[div];
     const total=buses.length;
     const oos=buses.filter(b=>b.status_now==='O/S').length;
-    const utilized=buses.filter(b=>ran(b.name)).length;
+    // Mutually exclusive buckets so total = oos + utilized + availNotUtil:
+    // a bus that ran earlier but is O/S right now counts as Out of Service, not Utilized.
+    const utilized=buses.filter(b=>ran(b.name)&&b.status_now!=='O/S').length;
     const idleBuses=buses.filter(b=>!ran(b.name)&&b.status_now!=='O/S');
     const availNotUtil=idleBuses.length;
     const miles=buses.reduce((s,b)=>s+milesOf(b.name),0);
@@ -6932,7 +6934,7 @@ function fuCompute(indices){
   }
   const F={total:roster.length,
            oos:roster.filter(b=>b.status_now==='O/S').length,
-           utilized:roster.filter(b=>ran(b.name)).length,
+           utilized:roster.filter(b=>ran(b.name)&&b.status_now!=='O/S').length,
            availNotUtil:roster.filter(b=>!ran(b.name)&&b.status_now!=='O/S').length,
            mpbd:fleetMpbd};
   return {fleet:F,byDiv:divM,fleetMpbd,ndays,ran,milesOf};
