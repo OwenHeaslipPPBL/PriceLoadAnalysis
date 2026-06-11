@@ -5426,7 +5426,19 @@ function effectiveCapacity(pax, schedule, dateISO){
     // Otherwise let tripStatus drive the doubled decision (fare-aware or tix-only fallback).
     const s = tripStatus(pax, schedule, dateISO);
     if(s.doubled) return PPB_CAPACITY_DOUBLED;
+    // CONSERVATIVE: when sched+date ARE provided and BOTH ops and tripStatus say single,
+    // trust them. Don't fall through to the legacy pax>56 heuristic — multi-stop routes
+    // routinely accumulate 60-100 tix on a single 54-seater via passenger turnover, so
+    // tix>56 alone is NOT a doubled signal. (Past trips that fall out of DCC's 42-day
+    // forward window land here; tripStatus's tix-fallback-conservative correctly returns
+    // doubled=false; honor it instead of overriding.) Added 2026-06-11 — ops manager
+    // reported miles still showing doubled on past BOS multi-stop trips even after the
+    // 6/9 tripStatus fix, because this function bypassed tripStatus's verdict.
+    return PPB_CAPACITY;
   }
+  // Pre-context fallback — callers that pass pax-only (e.g. _v4LoadFor for Price
+  // Suggestions scoring) have no way to check ops dash. Tix>56 stays over-eager here
+  // but no caller surfaces it as a "miles x2" line on the Loads tab.
   if(pax>56)return PPB_CAPACITY_DOUBLED;
   if(pax>54)return 56;
   return PPB_CAPACITY;
