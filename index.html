@@ -4151,7 +4151,17 @@ function showODTip(ev,sched,dateISO){
   const _effMiles=_doubled?_miles*2:_miles;
   let revLine='';
   if(_trev>0&&_effMiles>0){
-    revLine='<div style="margin-top:3px">Rev: <span style="color:var(--text2)">$'+Math.round(_trev).toLocaleString()+'</span> &middot; <span style="color:var(--text2)">'+Math.round(_effMiles).toLocaleString()+' mi'+(_doubled?' &times;2':'')+'</span> &middot; <span style="color:var(--text2)">$'+(_trev/_effMiles).toFixed(2)+'/mi</span></div>';
+    // Make the math self-evident. A doubled trip runs two buses over the route, so
+    // operated miles = route x 2 and $/mi = revenue / operated miles. Show the
+    // multiplication explicitly (NOT a bare '×2' next to the already-doubled total,
+    // which read as 'double it again') and compute the rate from the SAME rounded
+    // numbers shown, so Rev / miles always equals the displayed $/mi exactly.
+    const _revR=Math.round(_trev), _miR=Math.round(_effMiles);
+    const _rate=(_revR/_miR).toFixed(2);
+    const _milesPart=_doubled
+      ? Math.round(_miles).toLocaleString()+' &times; 2 buses = '+_miR.toLocaleString()+' mi'
+      : _miR.toLocaleString()+' mi';
+    revLine='<div style="margin-top:3px">Rev: <span style="color:var(--text2)">$'+_revR.toLocaleString()+'</span> &middot; <span style="color:var(--text2)">'+_milesPart+'</span> &middot; <span style="color:var(--text2)">$'+_rate+'/mi</span></div>';
   }
   tip.innerHTML=`<div class="od-head">Sched ${sched.trim()} &middot; ${isoToMDYY(dateISO)}</div>${rows}<div class="od-foot">Total ticketed: <strong>${total}</strong>${avgFootLabel}${paceLine}${revLine}</div>`;
   tip.classList.add('show');posODTip(ev);
