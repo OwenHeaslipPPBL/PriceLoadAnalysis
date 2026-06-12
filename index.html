@@ -3366,7 +3366,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
     </div>
   </div>
 
-  <!-- FLEET UTILIZATION (Saucon + ops sheet) — CEO fleet-utilization report -->
+  <!-- FLEET UTILIZATION (Saucon GPS mileage + garage ops sheet) -->
   <div class="panel" id="panel-fleet">
     <div class="settings-bar">
       <span class="set-label">Period</span>
@@ -6825,8 +6825,8 @@ async function mfSubmit(){
   }
 }
 
-// ── FLEET UTILIZATION (Saucon + ops sheet) — CEO fleet-utilization report ──
-// Answers Peter Picknelly's four metrics (total / out-of-service / utilized /
+// ── FLEET UTILIZATION (Saucon GPS mileage + garage ops sheet) ──
+// Reports the four fleet metrics (total / out-of-service / utilized /
 // available-not-utilized) per division + fleet-wide, over a selectable period
 // (Rolling 7-day default / Daily / Weekly / Monthly). Data = compact daily panel
 // from process_saucon.py; EVERY metric is computed here by fuCompute() so the
@@ -6849,7 +6849,7 @@ window.FU_TT = {
   total:{t:'Total Fleet (active)',b:'GPS-tracked MCI coaches in Saucon that ran at least once in the last 90 days. Dormant buses (no movement in 90 days &mdash; sold or stored but still in Saucon) are excluded so they don&rsquo;t inflate the slack. Source: Saucon telematics roster.'},
   oos:{t:'Out of Service',b:'Buses currently flagged O/S on the garage status boards &mdash; today&rsquo;s live snapshot. A 7-day average builds as we capture the boards daily. Source: shared garage ops Google Sheet.'},
   util:{t:'Utilized',b:'Buses that ran more than 25 miles on at least one day in the period AND are currently available. A bus that ran earlier but is in the shop now counts under Out of Service instead, so the four numbers add up to the total fleet. Source: Saucon mileage + garage-board status.'},
-  anu:{t:'Available &middot; Not Utilized',b:'The CEO&rsquo;s key metric: buses available but NOT used &mdash; ran zero days in the period AND not out of service. This is the genuine slack to reassign or shed. Source: Saucon mileage + garage-board status.'},
+  anu:{t:'Available &middot; Not Utilized',b:'Buses available but NOT used &mdash; ran zero days in the period AND not currently out of service. The slack that usually goes undiscussed, and the key to right-sizing. Source: Saucon mileage + garage-board status.'},
   mpbd:{t:'Fleet mi / bus / day',b:'Average intensity = total active-fleet miles &divide; (active buses &times; days in period). Each division&rsquo;s fat/lean Index is its own mi/bus/day &divide; this fleet average.'},
   c_total:{t:'Total',b:'Active buses assigned to this division (Home Base).'},
   c_oos:{t:'Out of Service',b:'Buses from this division currently flagged O/S on the garage boards. &#9888; marks a division with more than 25% of its fleet down.'},
@@ -6981,7 +6981,7 @@ function renderFleet(){
   const F=C.fleet;
   const utilPct=F.total?Math.round(100*F.utilized/F.total):0;
 
-  // ── Hero KPIs — the CEO's four (available-not-utilized featured) ──
+  // ── Hero KPIs — the four fleet metrics (available-not-utilized featured) ──
   const kpi=(label,val,cls,note,key)=>`<div class="mkpi" style="cursor:help" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label">${label}</div><div class="mkpi-val ${cls||''}">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
   const featured=(label,val,note,key)=>`<div class="mkpi" style="cursor:help;border:1px solid var(--cream);border-radius:8px;background:rgba(212,196,168,.06)" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label" style="color:var(--cream)">${label}</div><div class="mkpi-val cream">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
   const dormN=(loadFu().dormant_buses||[]).length;
