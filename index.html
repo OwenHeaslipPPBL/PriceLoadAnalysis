@@ -3368,6 +3368,11 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 
   <!-- FLEET UTILIZATION (Saucon GPS mileage + garage ops sheet) -->
   <div class="panel" id="panel-fleet">
+    <div class="rpm-toggle" id="fuSubNav" style="margin-bottom:14px">
+      <button class="rpm-tog-btn active" onclick="setFuSub('overview',this)">Overview</button>
+      <button class="rpm-tog-btn" onclick="setFuSub('heatmap',this)">Bus &times; Weekday Heat Map</button>
+    </div>
+    <div id="fuSubOverview">
     <div class="settings-bar">
       <span class="set-label">Period</span>
       <div class="rpm-toggle" id="fuViewToggle">
@@ -3419,6 +3424,54 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
         </div>
       </div>
       <div class="table-wrap" style="max-height:520px;overflow-y:auto"><table id="fuBusTable" style="width:100%;border-collapse:collapse;font-size:12px"></table></div>
+    </div>
+    </div><!-- /fuSubOverview -->
+
+    <div id="fuSubHeatmap" style="display:none">
+      <div class="settings-bar">
+        <span class="set-label">Location</span>
+        <div class="set-val"><select id="fuHmLoc" onchange="setFuHmLoc(this.value)" style="background:var(--surface);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:4px 8px;font-family:'Exo 2',sans-serif;font-size:12px"></select></div>
+        <div class="fsep"></div>
+        <span class="set-label">Window</span>
+        <div class="rpm-toggle" id="fuHmWin">
+          <button class="rpm-tog-btn" onclick="setFuHmWin(7,this)">This week</button>
+          <button class="rpm-tog-btn" onclick="setFuHmWin(28,this)">4 wks</button>
+          <button class="rpm-tog-btn active" onclick="setFuHmWin(56,this)">8 wks</button>
+          <button class="rpm-tog-btn" onclick="setFuHmWin(999,this)">All</button>
+        </div>
+        <div class="fsep"></div>
+        <span class="set-label">Color by</span>
+        <div class="rpm-toggle" id="fuHmMetric">
+          <button class="rpm-tog-btn active" onclick="setFuHmMetric('usage',this)">Usage %</button>
+          <button class="rpm-tog-btn" onclick="setFuHmMetric('miles',this)">Miles</button>
+        </div>
+      </div>
+      <div class="settings-bar">
+        <span class="set-label">Rows</span>
+        <div class="rpm-toggle" id="fuHmRows">
+          <button class="rpm-tog-btn active" onclick="setFuHmRows('bus',this)">By bus</button>
+          <button class="rpm-tog-btn" onclick="setFuHmRows('div',this)">By division</button>
+        </div>
+        <div class="fsep"></div>
+        <span class="set-label">Sort</span>
+        <div class="rpm-toggle" id="fuHmSort">
+          <button class="rpm-tog-btn active" onclick="setFuHmSort('loc',this)">Location</button>
+          <button class="rpm-tog-btn" onclick="setFuHmSort('idle',this)">Most idle</button>
+          <button class="rpm-tog-btn" onclick="setFuHmSort('active',this)">Most active</button>
+        </div>
+        <div class="fsep"></div>
+        <span class="set-label">Status</span>
+        <div class="rpm-toggle" id="fuHmStatus">
+          <button class="rpm-tog-btn active" onclick="setFuHmStatus('all',this)">All</button>
+          <button class="rpm-tog-btn" onclick="setFuHmStatus('avail',this)">Available</button>
+          <button class="rpm-tog-btn" onclick="setFuHmStatus('oos',this)">O/S</button>
+        </div>
+        <div class="fsep"></div>
+        <button class="rpm-tog-btn" id="fuHmSlackBtn" onclick="toggleFuHmSlack(this)" style="border:1px solid var(--border2);border-radius:6px">Slack only</button>
+      </div>
+      <div id="fuHmNote" class="muted" style="font-size:11px;margin-top:8px"></div>
+      <div id="fuHmLegend" style="margin-top:8px"></div>
+      <div class="table-wrap" style="max-height:640px;overflow:auto;margin-top:10px"><table id="fuHmTable" style="border-collapse:collapse;font-size:11px"></table></div>
     </div>
   </div>
 
@@ -4987,6 +5040,12 @@ let opsLookup  = {};   // populated from <script id="pp-opsdash"> at boot
 // PUBLISH SWITCH: FLEET_TAB_PUBLISHED=false hides the tab on the live site (?fleet=1 previews).
 var FLEET_TAB_PUBLISHED = true;
 var __fu = null, __fuView = 'r7', __fuPeriodIdx = 0, __fuRowFilter = 'all', __fuBusSort = {col:'miles', dir:-1};
+// Heat-map subtab state (declared early, as var, so loadDash->renderFleet can't TDZ on them).
+var __fuSub = 'overview', __fuHmLoc = 'all', __fuHmStatus = 'all', __fuHmWin = 56, __fuHmMetric = 'usage';
+var __fuHmRows = 'bus', __fuHmSort = 'loc', __fuHmSlack = false;
+// Saucon-first: a board "O/S" whose Saucon miles show it ran within this many recent days
+// is treated as a stale board entry and NOT counted out of service. (Owen 2026-06-16.)
+var FU_OOS_RECENCY_DAYS = 2;
 const SOLDOUT_CAP = 54;
 const DOUBLED_THRESHOLD_TIX   = 56;   // tix-only signal: definitive doubled
 const DOUBLED_THRESHOLD_TOTAL = 95;   // fare-aware: bookable capacity near doubled (108)
@@ -5207,6 +5266,19 @@ function getTimeBand(mins){
 }
 const BAND_ORDER=['🌅 Morning','☀️ Afternoon','🌆 Evening','🌙 Night'];
 function priceTarget(raw){return Math.round(raw/5)*5-0.01;}
+// Cap on auto-suggested raises: never propose more than +50% over the current fare
+// (a capacity-respect guardrail so a big FlixBus gap can't push a wild raise on a bus
+// that can't actually absorb it). Owen 2026-06-16. Applies to computeV4 suggestions only,
+// NOT the Manual Fare tab (those are deliberate operator-set prices).
+const MAX_RAISE_PCT = 0.50;
+// Largest priceTarget-rounded fare that does not exceed fare*(1+MAX_RAISE_PCT).
+function raiseCeiling(fare){
+  if(!fare) return Infinity;
+  const capRaw = fare*(1+MAX_RAISE_PCT);
+  let cap = priceTarget(capRaw);
+  if(cap > capRaw) cap -= 5;       // priceTarget rounded UP past the ceiling -> step down one $5 bucket
+  return cap < fare ? fare : cap;  // safety: never below the current fare
+}
 
 // Suggestion decision logic — single source of truth so it can be re-run off a
 // live fare. Returns {action,target,reason,gapPct} from (fare, flixFare, load, vel, daysOut).
@@ -5670,6 +5742,12 @@ function computeV4(r){
       action='Raise';target=priceTarget(r.fare+2);
     }
   }
+  // Cap raises at +50% of the current fare (capacity-respect guardrail, Owen 2026-06-16).
+  let raiseCapped=false;
+  if(action==='Raise'){
+    const cap=raiseCeiling(r.fare);
+    if(target>cap){target=cap;raiseCapped=true;}
+  }
   // Plain-language reason for the chosen action (drives the Action-cell tooltip + the approval log).
   const _lp=Math.round(_v4LoadFor(r)*100);
   let reason;
@@ -5684,6 +5762,7 @@ function computeV4(r){
       if(F>0.5&&r.flixSeats!=null)bits.push('FlixBus filling ('+r.flixSeats+' seats left)');
       reason=(bits.length?bits.join(', '):'demand signals net positive')+' → raise to '+fMoney(target)+'.';
     }
+    if(raiseCapped) reason+=' (capped at +50% of current)';
   } else if(action==='Lower'){
     reason='+'+Math.round(r.gapPct)+'% over FlixBus, only '+_lp+'% full, demand soft → lower to '+fMoney(target)+'.';
   } else if(r.flixFare===null){
@@ -6911,12 +6990,12 @@ function loadFu(){
 // styled tooltip used on Loads/Suggestions), NOT native title= attributes.
 window.FU_TT = {
   total:{t:'Total Fleet (active)',b:'GPS-tracked MCI coaches that ran at least once in the last 90 days. Excludes dormant buses (no movement in 90 days) and buses traded in or sold that are still pending removal from Saucon &mdash; so neither inflates the count or the slack. Source: Saucon telematics + trade-in list.'},
-  oos:{t:'Out of Service',b:'Buses currently flagged O/S on the garage status boards &mdash; today&rsquo;s live snapshot. A 7-day average builds as we capture the boards daily. Source: shared garage ops Google Sheet.'},
-  util:{t:'Utilized',b:'Buses that ran more than 25 miles on at least one day in the period AND are currently available. A bus that ran earlier but is in the shop now counts under Out of Service instead, so the four numbers add up to the total fleet. Source: Saucon mileage + garage-board status.'},
+  oos:{t:'Out of Service',b:'Buses flagged O/S on the garage boards right now &mdash; but <b>validated against Saucon</b>: a board O/S that the mileage feed shows ran in the last 2 days is treated as a stale entry and counts under Utilized instead (miles are the truer source). Source: garage boards, validated by Saucon mileage.'},
+  util:{t:'Utilized',b:'Buses that ran more than 25 miles on at least one day in the period and are not validly out of service. If the board flags a bus O/S but Saucon shows it ran in the last 2 days, it counts here &mdash; not under Out of Service. The four numbers still add up to the total fleet. Source: Saucon mileage (primary) + garage boards.'},
   anu:{t:'Available &middot; Not Utilized',b:'Buses available but NOT used &mdash; ran zero days in the period AND not currently out of service. The slack that usually goes undiscussed, and the key to right-sizing. Source: Saucon mileage + garage-board status.'},
   mpbd:{t:'Fleet mi / bus / day',b:'Average intensity = total active-fleet miles &divide; (active buses &times; days in period). Each division&rsquo;s fat/lean Index is its own mi/bus/day &divide; this fleet average.'},
   c_total:{t:'Total',b:'Active buses assigned to this division (Home Base).'},
-  c_oos:{t:'Out of Service',b:'Buses from this division currently flagged O/S on the garage boards. &#9888; marks a division with more than 25% of its fleet down.'},
+  c_oos:{t:'Out of Service',b:'Division buses flagged O/S on the boards now, validated against Saucon (a stale O/S that ran in the last 2 days is excluded). &#9888; marks a division with more than 25% of its fleet down.'},
   c_util:{t:'Utilized',b:'Division buses that ran more than 25 miles on at least one day in the period.'},
   c_anu:{t:'Available &middot; Idle',b:'Available but NOT used &mdash; ran zero days AND not out of service. The division&rsquo;s slack.'},
   c_mpbd:{t:'mi / Bus &middot; Day',b:'Division miles &divide; (its buses &times; days in period). Average usage intensity.'},
@@ -6979,6 +7058,13 @@ function fuCompute(indices){
   const thr=d.threshold_miles||25; const ndays=indices.length||1;
   const ran=(bn)=>indices.some(i=>((panel[bn]||[])[i]||0)>thr);
   const milesOf=(bn)=>indices.reduce((s,i)=>s+(((panel[bn]||[])[i])||0),0);
+  // Saucon-first OOS: trust the mileage feed over the hand-kept garage board. A bus the board
+  // flags O/S but that Saucon shows moved in the last ~2 days is a STALE board entry -> NOT
+  // counted Out of Service (it falls through to Utilized). Owen 2026-06-16: miles are truer.
+  const allDates=d.dates||[];
+  const recentIdx=[]; for(let i=Math.max(0,allDates.length-FU_OOS_RECENCY_DAYS);i<allDates.length;i++) recentIdx.push(i);
+  const ranRecently=(bn)=>recentIdx.some(i=>((panel[bn]||[])[i]||0)>thr);
+  const effOOS=(b)=>b.status_now==='O/S' && !ranRecently(b.name);
   const fleetMiles=roster.reduce((s,b)=>s+milesOf(b.name),0);
   const fleetMpbd=roster.length?fleetMiles/(roster.length*ndays):0;
   const byDiv={};
@@ -6987,11 +7073,12 @@ function fuCompute(indices){
   for(const div in byDiv){
     const buses=byDiv[div];
     const total=buses.length;
-    const oos=buses.filter(b=>b.status_now==='O/S').length;
-    // Mutually exclusive buckets so total = oos + utilized + availNotUtil:
-    // a bus that ran earlier but is O/S right now counts as Out of Service, not Utilized.
-    const utilized=buses.filter(b=>ran(b.name)&&b.status_now!=='O/S').length;
-    const idleBuses=buses.filter(b=>!ran(b.name)&&b.status_now!=='O/S');
+    const oos=buses.filter(b=>effOOS(b)).length;
+    // Mutually exclusive buckets so total = oos + utilized + availNotUtil. O/S = the
+    // Saucon-validated board status (effOOS): a stale O/S that actually ran recently falls
+    // through to Utilized, not Out of Service.
+    const utilized=buses.filter(b=>ran(b.name)&&!effOOS(b)).length;
+    const idleBuses=buses.filter(b=>!ran(b.name)&&!effOOS(b));
     const availNotUtil=idleBuses.length;
     const miles=buses.reduce((s,b)=>s+milesOf(b.name),0);
     const avail=total-oos;
@@ -7003,11 +7090,11 @@ function fuCompute(indices){
                idleNames:idleBuses.map(b=>b.name)};
   }
   const F={total:roster.length,
-           oos:roster.filter(b=>b.status_now==='O/S').length,
-           utilized:roster.filter(b=>ran(b.name)&&b.status_now!=='O/S').length,
-           availNotUtil:roster.filter(b=>!ran(b.name)&&b.status_now!=='O/S').length,
+           oos:roster.filter(b=>effOOS(b)).length,
+           utilized:roster.filter(b=>ran(b.name)&&!effOOS(b)).length,
+           availNotUtil:roster.filter(b=>!ran(b.name)&&!effOOS(b)).length,
            mpbd:fleetMpbd};
-  return {fleet:F,byDiv:divM,fleetMpbd,ndays,ran,milesOf};
+  return {fleet:F,byDiv:divM,fleetMpbd,ndays,ran,milesOf,effOOS,ranRecently};
 }
 
 function setFuView(v,btn){__fuView=v;__fuPeriodIdx=0;btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn));renderFleet();}
@@ -7093,7 +7180,7 @@ function renderFuBusTable(C, d, period){
   const rows=roster.filter(b=>b.division!=='Unassigned').map(b=>{
     const miles=idx.reduce((s,i)=>s+(((panel[b.name]||[])[i])||0),0);
     const daysRun=idx.filter(i=>((panel[b.name]||[])[i]||0)>(d.threshold_miles||25)).length;
-    const util=daysRun>0; const oos=b.status_now==='O/S';
+    const util=daysRun>0; const oos=C.effOOS(b);
     return {name:b.name,division:b.division,status:b.status_now||'',miles,daysRun,util,oos,
             year:b.year,make:b.make,model:b.model,
             vehicle:`${b.year||''} ${b.make||''} ${b.model||''}`.trim(),
@@ -7122,6 +7209,190 @@ function renderFuBusTable(C, d, period){
   const sa=col=>__fuBusSort.col===col?(__fuBusSort.dir<0?' \u25Be':' \u25b4'):'';
   const th=(t,al,col)=>`<th onclick="setFuBusSort('${col}')" title="Sort by ${t||'status'}" style="cursor:pointer;user-select:none;padding:8px;text-align:${al};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${t}${sa(col)}</th>`;
   document.getElementById('fuBusTable').innerHTML=`<thead><tr style="background:var(--surface);border-bottom:1px solid var(--border2);position:sticky;top:0">${th('Bus','left','name')}${th('Division','left','division')}${th('Miles','right','miles')}${th('Days run','right','daysRun')}${th('Status','center','status')}${th('Vehicle','left','vehicle')}${th('Use','center','state')}</tr></thead><tbody>${body}</tbody>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bus × Weekday heat map (subtab). Rows = bus, columns = the 7 weekdays, each cell
+// aggregates that bus's activity on that weekday across the selected window. Color
+// encodes avg miles (heat) OR usage % (toggle); OOS is a current-snapshot row badge
+// (the boards don't give historical per-day OOS). Owen 2026-06-16.
+// ─────────────────────────────────────────────────────────────────────────────
+function setFuSub(which, btn){
+  __fuSub = which;
+  if(btn && btn.parentElement) btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active', b===btn));
+  const ov=document.getElementById('fuSubOverview'), hm=document.getElementById('fuSubHeatmap');
+  if(ov) ov.style.display = which==='overview' ? '' : 'none';
+  if(hm) hm.style.display = which==='heatmap' ? '' : 'none';
+  if(which==='heatmap') renderFuHeatmap();
+}
+function setFuHmLoc(v){ __fuHmLoc=v; renderFuHeatmap(); }
+function setFuHmStatus(s,btn){ __fuHmStatus=s; btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn)); renderFuHeatmap(); }
+function setFuHmWin(n,btn){ __fuHmWin=+n; btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn)); renderFuHeatmap(); }
+function setFuHmMetric(m,btn){ __fuHmMetric=m; btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn)); renderFuHeatmap(); }
+function setFuHmRows(v,btn){ __fuHmRows=v; btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn)); renderFuHeatmap(); }
+function setFuHmSort(v,btn){ __fuHmSort=v; btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn)); renderFuHeatmap(); }
+function toggleFuHmSlack(btn){ __fuHmSlack=!__fuHmSlack; btn.classList.toggle('active',__fuHmSlack); renderFuHeatmap(); }
+// Aggregate a set of buses into one cell per weekday {dw,tot,run,occ,avg}. Used for single
+// buses, division rows, and division group-headers alike.
+function _fuHmAgg(buses, dows, winIdx, dayOf, panel, thr){
+  return dows.map(dw=>{
+    let tot=0,run=0,occ=0;
+    for(const b of buses){ const arr=panel[b.name]||[];
+      for(let k=0;k<winIdx.length;k++){ if(dayOf[k]===dw){ occ++; const m=arr[winIdx[k]]||0; tot+=m; if(m>thr)run++; } }
+    }
+    return {dw,tot,run,occ,avg:occ?tot/occ:0};
+  });
+}
+
+// Cell color. occ=0 -> that weekday never occurred in the window (n/a, gray).
+function _fuHmColor(metric, avg, maxAvg, usage, occ){
+  if(!occ) return {bg:'var(--surface2)', fg:'var(--text3)'};
+  if(metric==='usage'){
+    if(usage===0) return {bg:'rgba(148,163,184,.10)', fg:'var(--text3)'};   // available but never ran
+    const h=Math.round(usage*1.3);                                          // 0=red .. 130=green
+    return {bg:`hsla(${h},62%,42%,.85)`, fg:'#fff'};
+  }
+  // miles heat
+  if(avg<=0) return {bg:'rgba(148,163,184,.10)', fg:'var(--text3)'};        // idle that weekday
+  const a = maxAvg ? Math.max(0.12, Math.min(1, avg/maxAvg)) : 0.4;
+  return {bg:`rgba(34,197,94,${(a*0.8).toFixed(2)})`, fg: a>0.5 ? '#06240f' : 'var(--text)'};
+}
+
+function fuHmTip(ev, label, dow, avg, tot, run, occ, isDiv){
+  const tip=document.getElementById('od-tip'); if(!tip) return;
+  const usage = occ ? Math.round(100*run/occ) : 0;
+  const head = isDiv ? `${label} &middot; ${dow}s` : `Bus ${label} &middot; ${dow}s`;
+  let mid;
+  if(!occ){ mid = `No ${dow}s in this window`; }
+  else if(isDiv){
+    mid = `Avg <b style="color:var(--text)">${Math.round(avg)} mi</b> per bus per ${dow}<br>`+
+          `Ran <b style="color:var(--text)">${run}</b> of ${occ} bus-${dow}s (${usage}%)<br>`+
+          `<span style="color:var(--text3)">${Math.round(tot).toLocaleString()} mi total</span>`;
+  } else {
+    mid = `Avg <b style="color:var(--text)">${Math.round(avg)} mi</b> per ${dow}<br>`+
+          `Ran <b style="color:var(--text)">${run}</b> of ${occ} ${dow}${occ>1?'s':''} (${usage}%)<br>`+
+          `<span style="color:var(--text3)">Total ${Math.round(tot).toLocaleString()} mi across the window</span>`;
+  }
+  tip.innerHTML = `<div class="od-head">${head}</div><div style="line-height:1.7;font-size:11.5px;color:var(--text2);white-space:normal">${mid}</div>`;
+  tip.classList.add('show');
+  const tw=tip.offsetWidth||260, th=tip.offsetHeight||90, M=8;
+  let x=ev.clientX+14, y=ev.clientY+16;
+  if(x+tw>window.innerWidth-M) x=window.innerWidth-tw-M;
+  if(y+th>window.innerHeight-M) y=ev.clientY-th-10;
+  if(x<M)x=M; if(y<M)y=M;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+
+function renderFuHeatmap(){
+  const d=loadFu(); const dates=d.dates||[]; const panel=d.panel||{}; const thr=d.threshold_miles||25;
+  const tbl=document.getElementById('fuHmTable'); if(!tbl) return;
+  if(!dates.length){ tbl.innerHTML='<tbody><tr><td style="padding:12px;color:var(--text3)">No Saucon data yet.</td></tr></tbody>'; return; }
+  let roster=(d.roster||[]).filter(b=>b.active!==false && b.division!=='Unassigned');
+  // Location dropdown — build once (idempotent), preserve selection.
+  const sel=document.getElementById('fuHmLoc');
+  if(sel){
+    const divs=[...new Set(roster.map(b=>b.division))].sort();
+    if(sel.options.length!==divs.length+1)
+      sel.innerHTML='<option value="all">All locations</option>'+divs.map(dv=>`<option value="${dv}">${dv}</option>`).join('');
+    if(divs.indexOf(__fuHmLoc)<0 && __fuHmLoc!=='all') __fuHmLoc='all';
+    sel.value=__fuHmLoc;
+  }
+  // Saucon-first stale-O/S: board O/S that ran in the last FU_OOS_RECENCY_DAYS days is "stale".
+  const recentIdx=[]; for(let i=Math.max(0,dates.length-FU_OOS_RECENCY_DAYS);i<dates.length;i++) recentIdx.push(i);
+  const ranRecently=(bn)=>recentIdx.some(i=>((panel[bn]||[])[i]||0)>thr);
+  const effOOS=(b)=>b.status_now==='O/S' && !ranRecently(b.name);
+
+  if(__fuHmLoc!=='all') roster=roster.filter(b=>b.division===__fuHmLoc);
+  if(__fuHmStatus==='avail') roster=roster.filter(b=>!effOOS(b));
+  else if(__fuHmStatus==='oos') roster=roster.filter(b=>effOOS(b));
+
+  const start = __fuHmWin>=999 ? 0 : Math.max(0, dates.length-__fuHmWin);
+  const winIdx=[]; for(let i=start;i<dates.length;i++) winIdx.push(i);
+  const dayOf = winIdx.map(i=>new Date(dates[i]+'T00:00:00').getDay());
+  const dows=[1,2,3,4,5,6,0]; const dowLab={0:'Sun',1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat'};
+  const occByDow={}; dows.forEach(dw=>occByDow[dw]=dayOf.filter(x=>x===dw).length);
+  const metric=__fuHmMetric, rowsMode=__fuHmRows;
+
+  // Assemble the display rows. dataCells = the cells that drive the color scale.
+  let displayRows=[], dataCells=[];
+  if(rowsMode==='div'){
+    const divs=[...new Set(roster.map(b=>b.division))].sort();
+    divs.forEach(dv=>{
+      const buses=roster.filter(b=>b.division===dv);
+      const cells=_fuHmAgg(buses,dows,winIdx,dayOf,panel,thr);
+      dataCells.push(...cells);
+      displayRows.push({type:'div', label:dv, sub:buses.length+(buses.length===1?' bus':' buses'), cells});
+    });
+  } else {
+    let busRows=roster.map(b=>{
+      const cells=_fuHmAgg([b],dows,winIdx,dayOf,panel,thr);
+      const run=cells.reduce((s,c)=>s+c.run,0), occ=cells.reduce((s,c)=>s+c.occ,0), miles=cells.reduce((s,c)=>s+c.tot,0);
+      return {b, cells, run, occ, miles, usage:occ?run/occ:0};
+    });
+    if(__fuHmSlack) busRows=busRows.filter(r=>r.usage<=0.5);   // ran <= half their available days
+    if(__fuHmSort==='idle') busRows.sort((a,b)=>a.usage-b.usage || b.miles-a.miles);
+    else if(__fuHmSort==='active') busRows.sort((a,b)=>b.usage-a.usage || a.miles-b.miles);
+    else busRows.sort((a,b)=>{ if(a.b.division!==b.b.division)return a.b.division.localeCompare(b.b.division); const an=parseInt(a.b.name,10),bn=parseInt(b.b.name,10); if(!isNaN(an)&&!isNaN(bn))return an-bn; return String(a.b.name).localeCompare(String(b.b.name)); });
+    const grouped=(__fuHmSort==='loc'); let curDiv=null;
+    busRows.forEach(r=>{
+      if(grouped && r.b.division!==curDiv){
+        curDiv=r.b.division;
+        const dbuses=roster.filter(b=>b.division===curDiv);
+        displayRows.push({type:'group', label:curDiv, sub:String(dbuses.length), cells:_fuHmAgg(dbuses,dows,winIdx,dayOf,panel,thr)});
+      }
+      const boardOos=r.b.status_now==='O/S', isOos=effOOS(r.b);
+      dataCells.push(...r.cells);
+      displayRows.push({type:'bus', label:r.b.name, division:r.b.division, oos:isOos, stale:boardOos&&!isOos, cells:r.cells});
+    });
+  }
+  let maxAvg=0; dataCells.forEach(c=>{ if(c.avg>maxAvg)maxAvg=c.avg; });
+
+  const headTd='position:sticky;top:0;background:var(--surface);z-index:2;padding:7px 6px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);text-align:center';
+  const head=`<thead><tr><th style="position:sticky;left:0;top:0;z-index:3;background:var(--surface);padding:7px 10px;text-align:left;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3)">${rowsMode==='div'?'Division':'Bus'}</th>`+
+    dows.map(dw=>`<th style="${headTd}">${dowLab[dw]}<br><span style="color:var(--text3);font-weight:400;font-size:9px">${occByDow[dw]}d</span></th>`).join('')+`</tr></thead>`;
+
+  const cellHtml=(label,cell,isDiv)=>{
+    const usage=cell.occ?Math.round(100*cell.run/cell.occ):0;
+    const col=_fuHmColor(metric,cell.avg,maxAvg,usage,cell.occ);
+    const disp = !cell.occ ? '&middot;' : metric==='usage' ? (usage+'%') : (cell.avg>0?Math.round(cell.avg):'&middot;');
+    const safe=String(label).replace(/'/g,"\\'");
+    return `<td onmouseenter="fuHmTip(event,'${safe}','${dowLab[cell.dw]}',${cell.avg.toFixed(1)},${cell.tot.toFixed(0)},${cell.run},${cell.occ},${isDiv?'true':'false'})" onmouseleave="hideODTip()" style="text-align:center;padding:5px 4px;border-bottom:1px solid var(--border);background:${col.bg};color:${col.fg};font-family:'JetBrains Mono',monospace;cursor:help">${disp}</td>`;
+  };
+
+  const body=displayRows.map(r=>{
+    if(r.type==='group' || r.type==='div'){
+      const lbl=`<td style="position:sticky;left:0;background:var(--surface);z-index:1;padding:6px 10px;white-space:nowrap;border-top:2px solid var(--border2);border-bottom:1px solid var(--border)"><strong style="text-transform:uppercase;letter-spacing:.5px;font-size:11px">${r.label}</strong> <span style="color:var(--text3);font-size:10px">${r.sub}</span></td>`;
+      const tds=r.cells.map(c=>cellHtml(r.label,c,true)).join('');
+      return `<tr style="background:rgba(255,255,255,.02)">${lbl}${tds}</tr>`;
+    }
+    const badge = r.oos ? ' <span style="color:var(--bad);font-size:9px;font-weight:700">O/S</span>'
+                : r.stale ? ' <span style="color:var(--yellow);font-size:9px" title="Board says O/S but Saucon shows it ran recently">O/S?</span>' : '';
+    const lbl=`<td style="position:sticky;left:0;background:var(--surface);z-index:1;padding:5px 10px 5px 18px;white-space:nowrap;border-bottom:1px solid var(--border)"><strong>${r.label}</strong> <span style="color:var(--text3);font-size:10px">${r.division}</span>${badge}</td>`;
+    const tds=r.cells.map(c=>cellHtml(r.label,c,false)).join('');
+    return `<tr>${lbl}${tds}</tr>`;
+  }).join('');
+  tbl.innerHTML=head+`<tbody>${body}</tbody>`;
+
+  const winDays=winIdx.length;
+  const nUnit = rowsMode==='div' ? ([...new Set(roster.map(b=>b.division))].length+' divisions')
+                                 : (roster.length+(roster.length===1?' bus':' buses'));
+  const slackNote = __fuHmSlack ? ' &middot; <span style="color:var(--cream)">slack only (ran &le; half their days)</span>' : '';
+  const noteEl=document.getElementById('fuHmNote');
+  if(noteEl) noteEl.innerHTML=`${nUnit} &middot; last ${winDays} day${winDays===1?'':'s'} (${fuShort(dates[start])} &ndash; ${fuShort(dates[dates.length-1])}) &middot; each cell = ${metric==='usage'?('share of that weekday run &gt;'+thr+' mi'):'avg miles that weekday'}${slackNote}. Saucon miles drive the colors; the board only flags current O/S. Hover for detail.`;
+  const legEl=document.getElementById('fuHmLegend');
+  if(legEl){
+    let leg;
+    if(metric==='usage'){
+      leg=`<span style="color:var(--text3);font-size:10px">Usage&nbsp;%&nbsp;</span>`+
+        [0,25,50,75,100].map(p=>`<span style="display:inline-block;width:24px;height:12px;background:hsla(${Math.round(p*1.3)},62%,42%,.85);vertical-align:middle"></span>`).join('')+
+        `<span style="color:var(--text3);font-size:10px">&nbsp;0% &rarr; 100% &middot; gray = never ran</span>`;
+    } else {
+      leg=`<span style="color:var(--text3);font-size:10px">Avg&nbsp;miles&nbsp;</span>`+
+        [0.12,0.35,0.6,0.85,1].map(a=>`<span style="display:inline-block;width:24px;height:12px;background:rgba(34,197,94,${(a*0.8).toFixed(2)});vertical-align:middle"></span>`).join('')+
+        `<span style="color:var(--text3);font-size:10px">&nbsp;0 &rarr; ${Math.round(maxAvg)} mi &middot; gray = idle</span>`;
+    }
+    legEl.innerHTML=leg;
+  }
 }
 
 </script>
