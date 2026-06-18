@@ -202,6 +202,8 @@ table.pivot tbody tr:hover td.s3{background:var(--surface2);}
 .fc-hi{background:var(--fill-hi);color:#86efac;font-weight:700;}
 .fc-sold{background:var(--fill-sold);color:#000;font-weight:800;}
 .fc-dbl{background:var(--fill-dbl);color:var(--yellow);font-weight:700;}
+.fc-tpl{background:rgba(249,115,22,0.42);color:#fed7aa;font-weight:800;}
+.fc-quad{background:rgba(234,88,12,0.62);color:#fff;font-weight:800;}
 
 /* route col text */
 .route-text{display:flex;align-items:center;gap:5px;padding:0 10px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;width:160px;}
@@ -472,7 +474,8 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
         <span class="legend-dot" style="background:#fff;border:1px solid rgba(255,255,255,0.3)"></span><span style="color:#ccc">Sold Out</span>&nbsp;&nbsp;
         <span class="legend-dot" style="background:rgba(6,136,60,0.28)"></span><span style="color:#86efac">35+ tix</span>&nbsp;&nbsp;
         <span class="legend-dot" style="background:rgba(255,255,255,0.06)"></span><span style="color:var(--text3)">Under 35</span>&nbsp;&nbsp;
-        <span class="legend-dot" style="background:var(--yellow)"></span><span style="color:var(--yellow)">Doubled</span>
+        <span class="legend-dot" style="background:var(--yellow)"></span><span style="color:var(--yellow)">Doubled</span>&nbsp;&nbsp;
+        <span class="legend-dot" style="background:#f97316"></span><span style="color:#fbbf24">Tripled / Quad</span>
       </span>
     </div>
     <div class="filters">
@@ -3998,7 +4001,7 @@ function tixCls(t,c){const p=t/c;return p>=0.75?'t-hi':p>=0.4?'t-md':'t-lo';}
 // Cell color class. `doubled` is the SAME flag used to render the ×2 badge — passing it in
 // keeps the yellow color and the badge perfectly in sync. (Old behavior used tix>56 here,
 // which diverged from tripStatus and showed yellow without ×2 or vice versa.)
-function pivCls(tix,cap,doubled){if(!tix)return'fc-none';if(doubled)return'fc-dbl';if(tix>=cap)return'fc-sold';if(tix>=35)return'fc-hi';return'fc-none';}
+function pivCls(tix,cap,doubled,busCount){if(!tix)return'fc-none';if(doubled){const bc=busCount||2;return bc>=4?'fc-quad':bc===3?'fc-tpl':'fc-dbl';}if(tix>=cap)return'fc-sold';if(tix>=35)return'fc-hi';return'fc-none';}
 
 function mkpi(label,val,cls,note){
   return`<div class="mkpi"><div class="mkpi-label">${label}</div><div class="mkpi-val ${cls||''}">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
@@ -4125,7 +4128,8 @@ function renderOverview(){
       // outranks Sold Out (which may be a tix-fallback inference on past/today trips).
       const fare=fareLookup[(r.sched||'').toString().trim()+'|'+iso];
       const showBoth=(r.tix>54) && fare && fare.remaining===0;
-      const dblBadge='<span class="badge b-dbl">Doubled &times;2</span>';
+      const _bc=s.busCount||(s.doubled?2:1);
+      const dblBadge='<span class="badge b-dbl">'+(_bc>=5?'Multi':busWord(_bc))+' &times;'+_bc+'</span>';
       const soBadge ='<span class="badge" style="background:rgba(255,255,255,0.9);color:#000;font-weight:800">Sold Out</span>';
       let badge='';
       if(showBoth)        badge = dblBadge + ' ' + soBadge;
@@ -4272,8 +4276,8 @@ function showODTip(ev,sched,dateISO){
   // trips showed the ×2 badge (from tripStatus, seats>56) but single-bus miles here.
   // This is now identical to the cell badge's tripStatus().doubled signal.
   // (Fixed 2026-06-11 — ops manager: "doubled schedules only showing miles for one bus.")
-  const _doubled=_srow?(effectiveCapacity(_srow.tix, sched.trim(), dateISO)>DOUBLED_THRESHOLD_TIX):false;
-  const _effMiles=_doubled?_miles*2:_miles;
+  const _bc=_srow?busesFor(effectiveCapacity(_srow.tix, sched.trim(), dateISO)):1;
+  const _effMiles=_miles*_bc;
   let revLine='';
   if(_trev>0&&_effMiles>0){
     // Make the math self-evident. A doubled trip runs two buses over the route, so
@@ -4283,8 +4287,8 @@ function showODTip(ev,sched,dateISO){
     // numbers shown, so Rev / miles always equals the displayed $/mi exactly.
     const _revR=Math.round(_trev), _miR=Math.round(_effMiles);
     const _rate=(_revR/_miR).toFixed(2);
-    const _milesPart=_doubled
-      ? Math.round(_miles).toLocaleString()+' &times; 2 buses = '+_miR.toLocaleString()+' mi'
+    const _milesPart=_bc>1
+      ? Math.round(_miles).toLocaleString()+' &times; '+_bc+' buses = '+_miR.toLocaleString()+' mi'
       : _miR.toLocaleString()+' mi';
     revLine='<div style="margin-top:3px">Rev: <span style="color:var(--text2)">$'+_revR.toLocaleString()+'</span> &middot; <span style="color:var(--text2)">'+_milesPart+'</span> &middot; <span style="color:var(--text2)">$'+_rate+'/mi</span></div>';
   }
@@ -4312,7 +4316,7 @@ function showDayStatsTip(ev,dk){
            row('Total tickets',s.totalTix.toLocaleString())+
            row('Avg per trip',s.avgTix);
   if(s.soldOut)body+=row('Sold out',s.soldOut);
-  if(s.doubled)body+=row('Doubled',s.doubled);
+  if((s.busCount||1)>1)body+=row('Buses',s.busCount);
   // Bundled revenue · miles · revenue-per-mile for the whole day (matches the cell tooltip format).
   let revLine='';
   if(s.revPerMile!=null){
@@ -4409,7 +4413,7 @@ function renderLoads(){
     mkpi('Trips (window)',trips.length,'','unique schedules')+
     mkpi('Total Tickets',totalTix.toLocaleString(),'green',isPast?'tickets sold':'in date window')+
     mkpi('Avg Load',avgFill+'%',avgFill>=75?'green':avgFill>=40?'yellow':'red','of '+cap+'-seat capacity')+
-    mkpi(isPast?'Doubled Runs':'Doubled Runs',doubled,'yellow','2nd bus attached')+
+    mkpi('Multi-Bus Runs',doubled,'yellow','2+ buses (incl. triples/quads)')+
     mkpi(isPast?'Low Load':'Low Load',low,'red','under 40% capacity');
 
   // Per-day rollup stats — drives the avg-load subhead under each date column.
@@ -4434,9 +4438,9 @@ function renderLoads(){
       // Revenue = sum of 3099 ticket values across the booking curve for this trip.
       const sd=window.salesByDate&&window.salesByDate[String(t.sched).trim()+'|'+isoToMDYY(dk)];
       if(sd){for(const d in sd){(sd[d].segs||[]).forEach(seg=>{dayRev+=(seg.v||0);});}}
-      // Miles = route distance (×2 when a 2nd bus is attached to the run).
+      // Miles = route distance × the number of buses on the run (×2 doubled, ×3 tripled…).
       const mi=milesByKey[String(t.sched).trim()+'|'+dk]||0;
-      dayMiles+=(s.doubled?mi*2:mi);
+      dayMiles+=mi*(s.busCount||1);
     });
     dayStats[dk]={tripCount,totalTix,avgTix:Math.round(avgTix),avgPct,soldOut,doubled,
                   rev:dayRev,miles:dayMiles,revPerMile:(dayMiles>0?dayRev/dayMiles:null)};
@@ -4486,10 +4490,11 @@ function renderLoads(){
         // trips with a 2nd bus attached even before tix crosses 56.
         const st=tripStatus(tix, trip.sched, dk);
         const doubled=st.doubled;
-        const effCap=doubled?cap*2:cap;
+        const bc=st.busCount||(doubled?2:1);
+        const effCap=cap*bc;
         const pct=Math.round(tix/effCap*100);
-        const cls=pivCls(tix,cap,doubled);   // pass doubled so color matches the ×2 badge
-        row+=`<td style="cursor:pointer" onmouseenter="showODTip(event,'${trip.sched}','${dk}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()"><div class="fill-cell-piv ${cls}">${tix}${doubled?'<span style="font-size:8px;margin-left:2px">×2</span>':''}</div></td>`;
+        const cls=pivCls(tix,cap,doubled,bc);   // multi-bus heat ramp: ×2 yellow, ×3 orange, ×4 deep orange
+        row+=`<td style="cursor:pointer" onmouseenter="showODTip(event,'${trip.sched}','${dk}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()"><div class="fill-cell-piv ${cls}">${tix}${bc>1?'<span style="font-size:8px;margin-left:2px">×'+bc+'</span>':''}</div></td>`;
       }
     });
     row+='</tr>';
@@ -4817,7 +4822,7 @@ function renderWatchlist(){
     mkpi('Cancel Candidates',cancelList.length,cancelList.length>0?'red':'',`within ${wdays}d, under ${cancelT} tix`)+
     mkpi('Revenue at Risk',fMoney(rev_risk),'red','from cancel candidates')+
     mkpi('Add Capacity',addList.length,'green',`over ${addT} tix sold`)+
-    mkpi('Already Doubled',doubled_cnt,'yellow','2nd bus attached')+
+    mkpi('Already Multi-Bus',doubled_cnt,'yellow','2+ buses (incl. triples/quads)')+
     mkpi('High-Demand Rev',fMoney(pot_rev),'cream','from full trips');
 
   document.getElementById('cancelCnt').textContent=cancelList.length;
@@ -4848,10 +4853,10 @@ function renderWatchlist(){
       }
       // Doubled flag via tripStatus (fare-aware) so 2nd-bus trips with low tix show ×2 too.
       const _ws=tripStatus(r.tix, r.sched, r.depDate?r.depDate.toISOString().slice(0,10):'');
-      const doubled=_ws.doubled,effCap=doubled?cap*2:cap;
+      const doubled=_ws.doubled,_wbc=_ws.busCount||(doubled?2:1),effCap=cap*_wbc;
       const pct=Math.min(Math.round(r.tix/effCap*100),100);
-      const fc=doubled?'var(--yellow)':fillColor(pct);
-      const dblTag=doubled?'<span class="dbl-badge">&times;2</span>':'';
+      const fc=doubled?(_wbc>=4?'#fb923c':_wbc===3?'#fbbf24':'var(--yellow)'):fillColor(pct);
+      const dblTag=_wbc>1?'<span class="dbl-badge">&times;'+_wbc+'</span>':'';
       addHtml+='<tr><td>'+raCell(r.org,r.dst,r.cor)+'</td><td>'+fTime(r.time)+'</td><td style="color:var(--text3)">'+r.sched+'</td><td>'+fDateS(r.depDate)+'</td><td class="t-hi">'+r.tix+dblTag+'</td><td><span style="color:'+fc+';font-weight:600">'+pct+'%</span></td></tr>';
     });
   }
@@ -5142,7 +5147,7 @@ function buildFareLookup(){
 function tripStatus(tix, schedule, dateISO){
   const sched = (schedule||'').toString().trim();
   const key   = sched + '|' + (dateISO||'').toString().trim();
-  let doubled, soldOut, source;
+  let doubled, soldOut, source, busCount;
 
   // ── 1. Authoritative: TDS Ops Dashboard (Seats committed by dispatch) ──
   // Per Owen 2026-05-21: rely on the Seats field ONLY for doubled detection.
@@ -5153,7 +5158,11 @@ function tripStatus(tix, schedule, dateISO){
   //   formally doubled it. Seats is the only field dispatch sets when committing.
   const ops = opsLookup[key];
   if(ops){
-    doubled = (ops.seats != null && ops.seats > DOUBLED_THRESHOLD_TIX);
+    // Bus multiplier from committed Seats (1/2/3/4...). Fall back to the DCC bus count
+    // only if Seats is missing. doubled stays "more than one bus" for back-compat.
+    busCount = busesFor(ops.seats);
+    if((ops.seats == null || ops.seats <= 0) && ops.buses) busCount = Math.max(1, Math.round(ops.buses));
+    doubled = busCount > 1;
     // Sold out: peak occupancy hit the bus capacity. Falls back to tix>=54 if
     // either field is missing.
     if(ops.max != null && ops.seats != null){
@@ -5162,7 +5171,7 @@ function tripStatus(tix, schedule, dateISO){
       soldOut = (tix||0) >= SOLDOUT_CAP;
     }
     source = 'ops-dash';
-    return { doubled, soldOut, source };
+    return { doubled, soldOut, source, busCount };
   }
 
   // ── 2. Fare-aware (future trips with scrape data) ──
@@ -5170,6 +5179,7 @@ function tripStatus(tix, schedule, dateISO){
   if(fare && fare.remaining != null){
     const total = (tix||0) + fare.remaining;
     doubled = total > DOUBLED_THRESHOLD_TOTAL;
+    busCount = doubled ? 2 : 1;   // fare data can't distinguish a 3rd/4th bus — best guess is "doubled"
     const today = new Date(); today.setHours(0,0,0,0);
     const depD  = dateISO ? new Date(dateISO+'T00:00:00') : null;
     if(depD && depD > today){
@@ -5179,7 +5189,7 @@ function tripStatus(tix, schedule, dateISO){
       soldOut = (tix||0) >= SOLDOUT_CAP;
       source  = 'fare-past';
     }
-    return { doubled, soldOut, source };
+    return { doubled, soldOut, source, busCount };
   }
 
   // ── 3. Tix-only fallback (past trips, unscraped routes) ──
@@ -5196,9 +5206,10 @@ function tripStatus(tix, schedule, dateISO){
   // day's pipeline runs. Longer-term fix: archive DCC daily so historical
   // doubled status is preserved.
   doubled = false;
+  busCount = 1;
   soldOut = (tix||0) >= SOLDOUT_CAP;
   source  = 'tix-fallback-conservative';
-  return { doubled, soldOut, source };
+  return { doubled, soldOut, source, busCount };
 }
 
 // Providence corridor has two NYC-bound stops (Bus Terminal + Downtown), so
@@ -5647,6 +5658,18 @@ function abbrevStop(s){
 // Phase 2b will weight these signals into a real score; Phase 2c wires commit checkboxes.
 const PPB_CAPACITY=54;        // single-bus baseline (most common coach size)
 const PPB_CAPACITY_DOUBLED=108;  // 2 × 54 — applies when a trip was doubled
+// Bus multiplier from a committed-seats total. <=56 → 1 (single coach); otherwise the
+// nearest whole number of ~54-seat coaches (102/108/110 → 2, 153/162 → 3, 204/216 → 4).
+// On busy days dispatch runs triples and quads, not just doubles — this drives every
+// place that used to assume "doubled = ×2": operated miles, capacity, badges, tooltips.
+// (Owen 2026-06-18.) Source of truth = DCC committed Seats (the trusted dispatch signal),
+// which already agrees with the DCC bus count (seats 162 ⇔ buses 3).
+function busesFor(seats){
+  if(seats==null || seats<=DOUBLED_THRESHOLD_TIX) return 1;
+  return Math.max(2, Math.round(seats/PPB_CAPACITY));
+}
+// Word form for badges: 2 Doubled, 3 Tripled, 4 Quadrupled, 5+ just "×N".
+function busWord(bc){ return bc===2?'Doubled':bc===3?'Tripled':bc===4?'Quadrupled':('&times;'+bc); }
 // Effective capacity per trip. Preferred path (Owen's 2026-05-21 update): if we have
 // fare-scrape data for this trip, use tripStatus() — it flags doubled by (tix+remaining)>56,
 // catching 2nd-bus trips before tix crosses 56. Otherwise fall back to the tix-only heuristic.
@@ -5834,12 +5857,13 @@ function showSugBreakdownTip(ev,key){
   const r=_findRowByKey(key); if(!r)return;
   const sched=String(r.schedule), iso=r.dateISO;
   const ops=opsLookup[sched+'|'+iso]||{};
-  const cap=effectiveCapacity(r.paxPerTrip, sched, iso);   // pass sched+date so doubled is detected (was a bug)
-  const doubled=cap>DOUBLED_THRESHOLD_TIX;   // >56 = any double (102/108/110), not just exactly 108
+  const cap=effectiveCapacity(r.paxPerTrip, sched, iso);   // total committed seats (162 = triple, 216 = quad, etc.)
+  const bc=busesFor(cap);
+  const doubled=bc>1;
   const sold=r.paxPerTrip;
   const row=(lbl,val,vcol)=>'<div class="od-row"><span class="od-seg" style="color:var(--text3)">'+lbl+'</span><span class="od-cnt"'+(vcol?' style="color:'+vcol+';font-weight:600"':'')+'>'+val+'</span></div>';
   // ── Occupancy: each fact labeled by source; never implied to sum ──
-  let occ=row('Capacity', doubled?('2 buses · '+cap):(cap+' seats'));
+  let occ=row('Capacity', bc>1?(bc+' buses · '+cap):(cap+' seats'));
   if(sold!=null)occ+=row('Sold (all legs)', sold+' tix','var(--text2)');
   if(r.remaining!==null){const rc=r.remaining<5?'var(--bad)':r.remaining<15?'var(--warn)':'var(--text2)';occ+=row('Bookable at this fare', String(r.remaining), rc);}
   if(ops.max!=null&&ops.max>0&&ops.seats!=null&&ops.seats>0){
@@ -6284,10 +6308,11 @@ function renderSuggestionsTable(rows){
     const pax=r.paxPerTrip;
     // Pass schedule + dateISO so effectiveCapacity uses fare-aware tripStatus when fares exist
     const cap=effectiveCapacity(pax, r.schedule, r.dateISO);
-    const doubled=cap>DOUBLED_THRESHOLD_TIX;   // >56 = any double (102/108/110), not just exactly 108
+    const bc=busesFor(cap);
+    const doubled=bc>1;
     const fillPct=(pax!==null)?Math.round(pax/cap*100):null;
     const fillCol=fillPct===null?'var(--text3)':fillPct>=80?'var(--good)':fillPct>=50?'var(--warn)':'var(--text2)';
-    const doubledTag=doubled?' <span style="color:var(--yellow);font-size:9px;font-weight:700;letter-spacing:.4px" title="Trip doubled — second bus added (PAX > 56)">×2</span>':'';
+    const doubledTag=bc>1?' <span style="color:var(--yellow);font-size:9px;font-weight:700;letter-spacing:.4px" title="'+busWord(bc)+' — '+bc+' buses on this run">&times;'+bc+'</span>':'';
     const loadLine='<div style="font-size:11px;line-height:1.5"><span style="color:var(--text3)">Load:</span> '
       +(pax!==null?'<span style="color:var(--text2)">'+pax+'/'+cap+'</span>'+doubledTag+' <span style="color:'+fillCol+';font-weight:600">('+fillPct+'%)</span>':'<span style="color:var(--text3)">unknown</span>')
       +(r.remaining!==null?' <span style="color:'+seatColor(r.remaining)+';font-size:10px">'+r.remaining+' seats left</span>':'')+'</div>';
