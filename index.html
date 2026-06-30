@@ -3198,13 +3198,14 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 
     <!-- Matched-trip side-by-side comparison -->
     <div id="compTripSection">
-      <div class="sec-title" style="margin-bottom:10px">Individual Trip Comparison</div>
+      <div class="sec-title" style="margin-bottom:4px">Individual Trip Comparison</div>
+      <div class="muted" style="font-size:11px;margin-bottom:10px">&ldquo;Seats Left&rdquo; = seats still <b>available for sale</b> (remaining) from live PPB &amp; FlixBus availability &mdash; <b>not</b> seats sold. Fewer seats left = that carrier is filling up.</div>
       <div class="table-wrap" id="matchedTableWrap">
         <table class="dt" id="matchedTable">
           <thead><tr>
             <th>Depart</th><th></th><th>Schedule</th>
             <th>PPB Fare</th><th>Flix Fare</th><th>Gap %</th>
-            <th>PPB Seats</th><th>Flix Seats</th><th>Δ Yesterday</th>
+            <th>PPB Seats Left</th><th>Flix Seats Left</th><th>Δ Yesterday</th>
           </tr></thead>
           <tbody id="matchedBody"><tr><td colspan="9" class="empty"><span class="empty-icon">📊</span>No fare data — run <code style="color:var(--yellow)">scrape_fares.py</code> then regenerate the dashboard.</td></tr></tbody>
         </table>
@@ -6034,7 +6035,7 @@ function showSugBreakdownTip(ev,key){
   }
   // ── Competitor ──
   const comp=row('Competitor', r.flixFare!=null
-    ?('Flix <b>'+fMoney(r.flixFare)+'</b>'+(r.flixSeats!=null?' ('+r.flixSeats+' seats)':'')+' · gap <span style="color:'+(r.gapPct>15?'var(--bad)':r.gapPct<-10?'var(--good)':'var(--warn)')+';font-weight:600">'+(r.gapPct>=0?'+':'')+r.gapPct.toFixed(1)+'%</span>'+(r.flixMatchType==='band'?' <span style="color:var(--text3);font-size:10px">~band</span>':''))
+    ?('Flix <b>'+fMoney(r.flixFare)+'</b>'+(r.flixSeats!=null?' ('+r.flixSeats+' seats left)':'')+' · gap <span style="color:'+(r.gapPct>15?'var(--bad)':r.gapPct<-10?'var(--good)':'var(--warn)')+';font-weight:600">'+(r.gapPct>=0?'+':'')+r.gapPct.toFixed(1)+'%</span>'+(r.flixMatchType==='band'?' <span style="color:var(--text3);font-size:10px">~band</span>':''))
     :'<i style="color:var(--text3)">no match</i>');
   // ── Pace: single trajectory signal (replaces the old velocity "Momentum" line) ──
   const pace=pacingFor(sched,iso);
@@ -6484,7 +6485,7 @@ function renderSuggestionsTable(rows){
       const gs=gv!==null?(gv>=0?'+':'')+gv.toFixed(1)+'%':'—';
       const gc=gv===null?'var(--text3)':gv>15?'var(--bad)':gv<-10?'var(--good)':'var(--warn)';
       compLine='<div style="font-size:11px;line-height:1.5"><span style="color:var(--text3)">Comp:</span> Flix <span style="color:var(--text2)">'+fMoney(r.flixFare)+'</span>'
-        +(r.flixSeats!==null?' <span style="color:'+seatColor(r.flixSeats)+';font-size:10px">('+r.flixSeats+' seats)</span>':'')
+        +(r.flixSeats!==null?' <span style="color:'+seatColor(r.flixSeats)+';font-size:10px">('+r.flixSeats+' seats left)</span>':'')
         +' → gap <span style="color:'+gc+';font-weight:600">'+gs+'</span>'
         +(r.flixMatchType==='band'?' <span style="color:var(--text3);font-size:9px" title="No Flix trip within ±1hr — same time-band avg used">~band</span>':'')
         +'</div>';
