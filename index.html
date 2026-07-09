@@ -39,6 +39,18 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
 /* OVERLAY */
 .overlay{position:fixed;inset:0;background:#000;z-index:500;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:36px;}
 .overlay.hidden{display:none;}
+/* ── Boot polish (2026-07-08): production always has embedded data, so the CSV
+   drop-zone is HIDDEN by default and a branded loading spinner shows during the
+   (multi-second) parse of the 12 MB document. The auto-loader adds .nodata to
+   the overlay only when no pp-embedded payload exists (dev/template case),
+   which reveals the classic drop-zone. */
+.overlay .drop-zone,.overlay .ov-note{display:none;}
+.overlay.nodata .drop-zone{display:block;}
+.overlay.nodata .ov-note{display:block;}
+.overlay.nodata .ov-loading{display:none;}
+.ov-loading{display:flex;align-items:center;gap:10px;margin-top:6px;color:var(--text2);font-size:13px;letter-spacing:1.5px;text-transform:uppercase;font-family:'Exo 2',sans-serif;font-weight:600;}
+.ov-spin{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--yellow);border-radius:50%;animation:ovspin .8s linear infinite;}
+@keyframes ovspin{to{transform:rotate(360deg)}}
 .ov-logo{text-align:center;}
 .ov-logo img{height:80px;mix-blend-mode:screen;margin-bottom:10px;}
 .ov-sub{font-family:'Exo 2',sans-serif;font-size:11px;letter-spacing:5px;text-transform:uppercase;color:var(--text3);font-weight:600;}
@@ -350,6 +362,68 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 .mom-vhi{color:#22c55e;font-size:14px;}      /* 10+: bold green, no glow */
 .mom-neg{color:var(--bad);font-size:12px;}    /* negative delta (cancellations) */
 .bc-now{color:var(--good);font-weight:600;}
+
+/* ═══ MOBILE LAYER (2026-07-08) ══════════════════════════════════════════════
+   Everything below applies ONLY under the breakpoints — the desktop layout
+   (≥861px) is untouched. Philosophy: don't redesign, adapt. Wide tables keep
+   their data and scroll horizontally inside their existing wrappers; grids
+   collapse; the tab bar becomes swipeable; inputs get iOS-safe font sizes. */
+@media (max-width:860px){
+  /* tablets + phones: collapse the multi-column grids */
+  .corridor-grid{grid-template-columns:repeat(2,1fr);}
+  .health-grid{grid-template-columns:repeat(2,1fr);gap:10px;}
+  .act-grid,.ov-tables,.ov-2col{grid-template-columns:1fr;}
+  /* KPI strip wraps into a 2-up grid instead of squeezing 7 cards into a row */
+  .mini-kpis{flex-wrap:wrap;}
+  .mkpi{flex:1 1 45%;min-width:150px;}
+}
+@media (max-width:640px){
+  html{ -webkit-text-size-adjust:100%; }
+  /* header: tighter, keep logo + chip; export button drops (desktop workflow) */
+  .header{padding:0 12px;height:56px;}
+  .logo img{height:34px;}
+  .logo-sub{font-size:8px;letter-spacing:2px;}
+  .report-chip{font-size:10px;padding:4px 9px;}
+  .export-btn{display:none !important;}
+  /* tab bar: swipeable strip, never wraps, stays sticky under the 56px header */
+  .tabs-bar{top:56px;padding:0 8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .tabs-bar::-webkit-scrollbar{display:none;}
+  .tab-btn{padding:12px 13px;font-size:11px;letter-spacing:1px;flex:0 0 auto;}
+  .content{padding:14px 10px;}
+  .sec-title{font-size:14px;letter-spacing:1.5px;}
+  /* single-column cards on phones */
+  .corridor-grid{grid-template-columns:1fr;}
+  .mkpi{padding:10px 12px;}
+  .mkpi-val{font-size:20px;}
+  /* settings/filter bars already wrap; just tighten */
+  .settings-bar{padding:10px 12px;gap:10px;}
+  .filters{gap:5px;}
+  .chip{padding:5px 10px;font-size:11px;}
+  .search-inp{width:100%;}
+  /* pivot: keep ONLY the route column sticky — on a 390px screen the three
+     frozen columns (160+76+72px) left no room for data. Time + Sched scroll. */
+  table.pivot th.s1,table.pivot td.s1{min-width:120px !important;max-width:130px;}
+  table.pivot th.s2,table.pivot td.s2,table.pivot th.s3,table.pivot td.s3{position:static;}
+  .route-text{font-size:10px;}
+  .pivot-wrap,.mom-wrap,#fareTableWrap{max-height:calc(100vh - 200px);-webkit-overflow-scrolling:touch;}
+  /* suggestions table: restore horizontal scroll (desktop trades it for
+     viewport-sticky headers, which don't matter on a phone) */
+  #suggestionsTableWrap{overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  /* the sticky Approve-Selected bar has many inline-flex children — let it wrap */
+  #sugSubmitBar{flex-wrap:wrap;row-gap:6px;}
+  /* competitor Individual Trip Comparison: its wrap is overflow:visible on
+     desktop (viewport-sticky headers); on a phone it must scroll instead */
+  #matchedTableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  /* modals: fit the screen */
+  #mfModalOverlay>div,#approvalModalOverlay>div{width:96vw !important;padding:16px 14px !important;max-height:88vh;}
+  /* iOS zooms the page when a focused input is <16px — bump ALL form controls */
+  input[type=text],input[type=number],input[type=password],select,.search-inp,.num-inp{font-size:16px !important;}
+  /* tooltips: cap to screen (they're hover/tap-triggered fixed boxes) */
+  #od-tip{max-width:88vw;}
+  /* drop-zone (dev only) + boot overlay fit small screens */
+  .drop-zone{width:92vw;padding:36px 20px;}
+  .ov-logo img{height:56px;}
+}
 </style>
 </head>
 <body>
@@ -381,6 +455,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
     </div>
   </div>
   <div class="ov-note">All data is processed locally in your browser — nothing is sent anywhere.<br>Reload the CSV each morning after your daily update.</div>
+  <div class="ov-loading"><div class="ov-spin"></div>Loading latest data&hellip;</div>
 </div>
 
 <div class="tabs-bar" id="tabsBar" style="display:none">
@@ -4900,11 +4975,14 @@ function exportReport(){
 
 // ── AUTO-LOAD IF DATA IS EMBEDDED ──
 (function(){
+  // No embedded data (dev/template case) → reveal the classic CSV drop-zone,
+  // which is otherwise hidden behind the boot spinner (2026-07-08).
+  const _showDropzone = () => { const ov=document.getElementById('overlay'); if(ov) ov.classList.add('nodata'); };
   try {
     const tag = document.getElementById('pp-embedded');
-    if (!tag) return;
+    if (!tag) { _showDropzone(); return; }
     const payload = JSON.parse(tag.textContent);
-    if (!payload || !payload.csv) return;
+    if (!payload || !payload.csv) { _showDropzone(); return; }
     // Data is embedded — go straight to dashboard
     document.getElementById('overlay').classList.add('hidden');
     document.getElementById('tabsBar').style.display = '';
@@ -4976,6 +5054,7 @@ function exportReport(){
     } catch(pe) { console.warn('Prior fare load failed:', pe); }
   } catch(e) {
     console.warn('Auto-load failed:', e);
+    _showDropzone();   // parse/render blew up — fall back to the manual CSV path
   }
 })();
 
