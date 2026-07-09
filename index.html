@@ -159,6 +159,10 @@ table.pivot th.s1{z-index:25;} table.pivot th.s2{z-index:25;} table.pivot th.s3{
 .ov-sec-label{font-family:'Exo 2',sans-serif;font-size:10px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--text3);white-space:nowrap;}
 .ov-sec-head::after{content:'';flex:1;height:1px;background:var(--border);}
 .ov-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.ov-3col{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+.ov-row-link{cursor:pointer;}
+.ov-row-link:hover td{background:rgba(255,255,255,.04);}
+.ov-subhead td{background:var(--surface2);color:var(--text3);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;font-family:'Exo 2',sans-serif;font-weight:800;padding:5px 12px;}
 .ov-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
 .ov-panel-head{padding:9px 14px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
 .ov-panel-title{font-family:'Exo 2',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;}
@@ -372,7 +376,8 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
   /* tablets + phones: collapse the multi-column grids */
   .corridor-grid{grid-template-columns:repeat(2,1fr);}
   .health-grid{grid-template-columns:repeat(2,1fr);gap:10px;}
-  .act-grid,.ov-tables,.ov-2col{grid-template-columns:1fr;}
+  .act-grid,.ov-tables,.ov-2col,.watch-grid{grid-template-columns:1fr;}
+  .ov-3col{grid-template-columns:1fr;}
   /* KPI strip wraps into a 2-up grid instead of squeezing 7 cards into a row */
   .mini-kpis{flex-wrap:wrap;}
   .mkpi{flex:1 1 45%;min-width:150px;}
@@ -414,6 +419,12 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
   /* competitor Individual Trip Comparison: its wrap is overflow:visible on
      desktop (viewport-sticky headers); on a phone it must scroll instead */
   #matchedTableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  /* Kill the viewport-sticky table headers + inline-sticky group rows on phones:
+     their --chrome-h/--sug-thead-top offsets are a desktop trick, and sticky
+     inside the now-scrollable wraps painted the header MID-TABLE with rows
+     bleeding above it (seen on Competitor + Suggestions, 2026-07-08 audit). */
+  #matchedTable thead th,#bandTable thead th,#suggestionsTable thead th,
+  #matchedTable tbody td,#bandTable tbody td,#suggestionsTable tbody td{position:static !important;}
   /* modals: fit the screen */
   #mfModalOverlay>div,#approvalModalOverlay>div{width:96vw !important;padding:16px 14px !important;max-height:88vh;}
   /* iOS zooms the page when a focused input is <16px — bump ALL form controls */
@@ -476,8 +487,12 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 
 <div class="content" id="mainContent" style="display:none">
 
-  <!-- OVERVIEW -->
+  <!-- OVERVIEW (Option B "morning brief" rebuild 2026-07-08: KPI hero row,
+       triaged action lists, Since-Yesterday movement, click-through to Loads) -->
   <div class="panel active" id="panel-overview">
+
+    <!-- Morning KPI hero row -->
+    <div class="mini-kpis" id="ovKpis"></div>
 
     <!-- Cancel + Sold Out -->
     <div class="ov-section">
@@ -486,7 +501,10 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
         <div class="ov-panel">
           <div class="ov-panel-head">
             <span class="ov-panel-title ov-cancel-title">Cancel Candidates</span>
-            <span class="ov-cnt" id="ovCancelCnt">0</span>
+            <span style="display:flex;align-items:center;gap:8px">
+              <button id="ovCancelToggle" onclick="toggleOvCancel()" style="display:none;background:none;border:1px solid var(--border2);border-radius:6px;padding:3px 10px;font-size:10px;color:var(--text2);cursor:pointer">Show all</button>
+              <span class="ov-cnt" id="ovCancelCnt">0</span>
+            </span>
           </div>
           <table class="dt"><thead><tr>
             <th>Route</th><th>Date</th><th>Time</th><th>Sched #</th><th>Tix</th><th>Days Out</th>
@@ -494,12 +512,46 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
         </div>
         <div class="ov-panel">
           <div class="ov-panel-head">
-            <span class="ov-panel-title ov-sold-title">Sold Out Buses</span>
+            <span class="ov-panel-title ov-sold-title">Sold Out / Full Buses</span>
             <span class="ov-cnt" id="ovSoldCnt">0</span>
           </div>
           <table class="dt"><thead><tr>
             <th>Route</th><th>Date</th><th>Time</th><th>Sched #</th><th>Tix</th><th>Status</th>
           </tr></thead><tbody id="ovSoldBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Since Yesterday — overnight movement (Option B) -->
+    <div class="ov-section">
+      <div class="ov-sec-head"><span class="ov-sec-label">&#127749; Since Yesterday &mdash; Overnight Movement</span></div>
+      <div class="ov-3col">
+        <div class="ov-panel">
+          <div class="ov-panel-head">
+            <span class="ov-panel-title" style="color:var(--green2)">Booking Gains</span>
+            <span class="ov-cnt" id="ovGainCnt">0</span>
+          </div>
+          <table class="dt"><thead><tr>
+            <th>Route</th><th>Dep</th><th>Sched #</th><th>Sold Yday</th><th>Rev</th>
+          </tr></thead><tbody id="ovGainBody"></tbody></table>
+        </div>
+        <div class="ov-panel">
+          <div class="ov-panel-head">
+            <span class="ov-panel-title" style="color:var(--yellow)">Our Fare Moves</span>
+            <span class="ov-cnt" id="ovFareCnt">0</span>
+          </div>
+          <table class="dt"><thead><tr>
+            <th>Trip</th><th>Dep</th><th>Sched #</th><th>Fare</th>
+          </tr></thead><tbody id="ovFareBody"></tbody></table>
+        </div>
+        <div class="ov-panel">
+          <div class="ov-panel-head">
+            <span class="ov-panel-title" style="color:var(--dc)">Applied via Dashboard</span>
+            <span class="ov-cnt" id="ovAppliedCnt">0</span>
+          </div>
+          <table class="dt"><thead><tr>
+            <th>When</th><th>Trip</th><th>Change</th>
+          </tr></thead><tbody id="ovAppliedBody"></tbody></table>
         </div>
       </div>
     </div>
@@ -2206,30 +2258,86 @@ dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over');}
 dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
 dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');const f=e.dataTransfer.files[0];if(f){const rd=new FileReader();rd.onload=ev=>loadDash(ev.target.result);rd.readAsText(f);}});
 
-// ── OVERVIEW ──
+// ── OVERVIEW (Option B "morning brief" rebuild, Owen picked 2026-07-08) ──
+// Click-through: any triage/movement row jumps to the Loads tab prefiltered to
+// that corridor, widens the date window to cover the trip, and flash-highlights
+// the trip's pivot row.
+var ovCancelExpanded=false;
+function toggleOvCancel(){ovCancelExpanded=!ovCancelExpanded;renderOverview();}
+function ovGo(cor,sched,iso){
+  try{
+    const sel=document.getElementById('lfCorSel');
+    if(sel){
+      const has=[...sel.options].some(o=>o.value===cor);
+      sel.value=has?cor:'ALL'; lFilter=sel.value;
+    }
+    // widen the date window if the trip departs beyond it
+    if(iso){
+      const t=new Date();t.setHours(0,0,0,0);
+      const dOut=Math.ceil((new Date(iso+'T00:00:00')-t)/864e5)+1;
+      const slider=document.getElementById('dateSlider');
+      if(slider && dOut>parseInt(slider.value)){slider.value=Math.min(72,Math.max(dOut,8));updateSliderLabel();}
+    }
+    const btn=document.querySelector('.tab-btn[data-tab="loads"]');
+    if(btn)switchTab(btn);
+    renderLoads();
+    setTimeout(()=>{
+      const hit=[...document.querySelectorAll('#pivotBody .sched-text')]
+        .find(c=>c.textContent.trim()===String(sched).trim());
+      if(hit){
+        const tr=hit.closest('tr');
+        tr.scrollIntoView({block:'center'});
+        tr.style.outline='2px solid var(--yellow)';
+        setTimeout(()=>{tr.style.outline='';},2500);
+      }
+    },200);
+  }catch(_){/* navigation is best-effort */}
+}
+function _ovRowAttr(r){
+  const iso=r.depDate?r.depDate.toISOString().slice(0,10):'';
+  return ' class="ov-row-link" title="Open in Loads" onclick="ovGo(\''+String(r.cor||'').replace(/'/g,'')+'\',\''+String(r.sched).trim()+'\',\''+iso+'\')"';
+}
+
 function renderOverview(){
   const cap=parseInt(document.getElementById('cap').value)||54;
   const today=new Date();today.setHours(0,0,0,0);
+  const todayISO=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+  const yd=new Date(today);yd.setDate(yd.getDate()-1);
+  const ydISO=yd.getFullYear()+'-'+String(yd.getMonth()+1).padStart(2,'0')+'-'+String(yd.getDate()).padStart(2,'0');
 
-  // Cancel candidates: <=2 days out, <4 tix — exclude subsidized routes
+  // Cancel candidates: <=2 days out, <4 tix — exclude subsidized routes.
+  // Option B triage: capped at 10 (Show all reveals the rest) and recurring
+  // schedules get a ×N badge so the daily Cape/Logan shuttles read as ONE
+  // pattern instead of drowning the list.
   const isSubsidized=r=>r.cor==='Hartford ↔ Providence'||r.org==='PTWN'||r.dst==='PTWN'||r.org==='PTWM'||r.dst==='PTWM';
   const cancelList=snapData.filter(r=>{
     if(!r.depDate||isSubsidized(r))return false;
     const d=Math.ceil((r.depDate-today)/864e5);
     return d>=0&&d<=2&&r.tix<4;
-  }).sort((a,b)=>(a.depDate?a.depDate.getTime():0)-(b.depDate?b.depDate.getTime():0));
+  }).sort((a,b)=>(a.depDate?a.depDate.getTime():0)-(b.depDate?b.depDate.getTime():0)||a.tix-b.tix);
+  const schedCounts={};
+  cancelList.forEach(r=>{const k=String(r.sched).trim();schedCounts[k]=(schedCounts[k]||0)+1;});
+  const CANCEL_CAP=10;
+  const cancelShown=ovCancelExpanded?cancelList:cancelList.slice(0,CANCEL_CAP);
+  const ct=document.getElementById('ovCancelToggle');
+  if(ct){
+    ct.style.display=cancelList.length>CANCEL_CAP?'':'none';
+    ct.textContent=ovCancelExpanded?'Top 10':'Show all '+cancelList.length;
+  }
   document.getElementById('ovCancelCnt').textContent=cancelList.length;
   document.getElementById('ovCancelBody').innerHTML=!cancelList.length
     ?'<tr><td colspan="6" class="empty"><span class="empty-icon">&#10003;</span><div class="empty-text">No cancel candidates right now</div></td></tr>'
-    :cancelList.map(r=>{
+    :cancelShown.map(r=>{
       const d=Math.ceil((r.depDate-today)/864e5);
-      return '<tr><td>'+raCell(r.org,r.dst,r.cor)+'</td><td>'+fDateS(r.depDate)+'</td><td>'+fTime(r.time)+'</td><td style="color:var(--text3)">'+r.sched+'</td><td class="t-lo">'+r.tix+'</td><td style="color:var(--text3)">'+d+'d</td></tr>';
+      const n=schedCounts[String(r.sched).trim()];
+      const rec=n>1?' <span title="This schedule appears '+n+' times in the next 3 days — a recurring near-empty run" style="color:var(--text3);font-size:9px;border:1px solid var(--border2);border-radius:4px;padding:0 4px">&times;'+n+'</span>':'';
+      return '<tr'+_ovRowAttr(r)+'><td>'+raCell(r.org,r.dst,r.cor)+'</td><td>'+fDateS(r.depDate)+'</td><td>'+fTime(r.time)+'</td><td style="color:var(--text3)">'+r.sched+rec+'</td><td class="t-lo">'+r.tix+'</td><td style="color:var(--text3)">'+d+'d</td></tr>';
     }).join('');
 
-  // Hot Trips: include any trip that is Sold Out OR Doubled (status driven by
-  // tripStatus(), which uses fare-scrape Remaining when available — see definition
-  // near loadFares for the full logic). Badge shows whichever statuses apply.
-  const soldList=snapData.filter(r=>{
+  // Sold Out / Full Buses — Option B split: NEEDS ACTION (single bus at
+  // capacity: raise fare / add bus decision) renders first; already-multi-bus
+  // trips are grouped below as HANDLED (dispatch committed extra buses).
+  const soldRaw=snapData.filter(r=>{
       const s=tripStatus(r.tix, r.sched, r.depDate?r.depDate.toISOString().slice(0,10):'');
       return s.doubled || s.soldOut;
     })
@@ -2237,19 +2345,13 @@ function renderOverview(){
       const da=(a.depDate?a.depDate.getTime():0),db=(b.depDate?b.depDate.getTime():0);
       if(da!==db)return da-db;return b.tix-a.tix;
     });
-  document.getElementById('ovSoldCnt').textContent=soldList.length;
-  document.getElementById('ovSoldBody').innerHTML=!soldList.length
-    ?'<tr><td colspan="6" class="empty"><span class="empty-icon">—</span><div class="empty-text">No sold-out trips</div></td></tr>'
-    :soldList.map(r=>{
+  const soldRow=r=>{
       const iso=r.depDate?r.depDate.toISOString().slice(0,10):'';
       const s=tripStatus(r.tix, r.sched, iso);
-      // Owen's 2026-05-21 refinement: show BOTH Doubled + Sold Out badges only when
-      // we can confirm fare-data sold-out AND substantial bookings:
-      //   tix > 54  AND  remaining === 0
-      // Otherwise prefer the single, more solid signal: Doubled (capacity-confirmed)
-      // outranks Sold Out (which may be a tix-fallback inference on past/today trips).
+      // Owen's 2026-05-21 refinement: show BOTH badges only when fare-data
+      // confirms sold-out AND substantial bookings (tix > cap, remaining 0).
       const fare=fareLookup[(r.sched||'').toString().trim()+'|'+iso];
-      const showBoth=(r.tix>SOLDOUT_CAP) && fare && fare.remaining===0;   // was a hardcoded 54 (2026-07-07)
+      const showBoth=(r.tix>SOLDOUT_CAP) && fare && fare.remaining===0;
       const _bc=s.busCount||(s.doubled?2:1);
       const dblBadge='<span class="badge b-dbl">'+(_bc>=5?'Multi':busWord(_bc))+' &times;'+_bc+'</span>';
       const soBadge ='<span class="badge" style="background:rgba(255,255,255,0.9);color:#000;font-weight:800">Sold Out</span>';
@@ -2257,8 +2359,92 @@ function renderOverview(){
       if(showBoth)        badge = (_bc>1 ? dblBadge + ' ' : '') + soBadge;
       else if(s.doubled)  badge = dblBadge;
       else if(s.soldOut)  badge = soBadge;
-      return '<tr><td>'+raCell(r.org,r.dst,r.cor)+'</td><td>'+fDateS(r.depDate)+'</td><td>'+fTime(r.time)+'</td><td style="color:var(--text3)">'+r.sched+'</td><td class="t-hi">'+r.tix+'</td><td>'+badge+'</td></tr>';
+      return '<tr'+_ovRowAttr(r)+'><td>'+raCell(r.org,r.dst,r.cor)+'</td><td>'+fDateS(r.depDate)+'</td><td>'+fTime(r.time)+'</td><td style="color:var(--text3)">'+r.sched+'</td><td class="t-hi">'+r.tix+'</td><td>'+badge+'</td></tr>';
+  };
+  const needsAction=soldRaw.filter(r=>{
+    const s=tripStatus(r.tix,r.sched,r.depDate?r.depDate.toISOString().slice(0,10):'');
+    return s.soldOut && (s.busCount||1)<=1;
+  });
+  const handled=soldRaw.filter(r=>!needsAction.includes(r));
+  document.getElementById('ovSoldCnt').textContent=needsAction.length+' / '+soldRaw.length;
+  let soldHtml='';
+  if(needsAction.length){
+    soldHtml+='<tr class="ov-subhead"><td colspan="6">&#9888; Needs a decision — single bus at capacity (raise / add bus)</td></tr>'
+      +needsAction.map(soldRow).join('');
+  }
+  if(handled.length){
+    soldHtml+='<tr class="ov-subhead"><td colspan="6">Handled — extra bus already committed</td></tr>'
+      +handled.map(soldRow).join('');
+  }
+  document.getElementById('ovSoldBody').innerHTML=soldHtml
+    ||'<tr><td colspan="6" class="empty"><span class="empty-icon">—</span><div class="empty-text">No sold-out trips</div></td></tr>';
+
+  // ── Since Yesterday: booking gains + fare moves (applied-via-dashboard fills
+  //    async from /log via renderOvApplied) ──
+  const snapByKey={};
+  snapData.forEach(r=>{if(r.depDate)snapByKey[String(r.sched).trim()+'|'+isoToMDYY(r.depDate.toISOString().slice(0,10))]=r;});
+  let ydTix=0, ydRev=0;
+  const gains=[];
+  const sbd=window.salesByDate||{};
+  for(const key in sbd){
+    const day=sbd[key][ydISO];
+    if(!day)continue;
+    const n=day.n||0;
+    let v=0;(day.segs||[]).forEach(s=>{v+=(s.v||0);});
+    ydTix+=n; ydRev+=v;
+    const meta=snapByKey[key];
+    if(meta && n>0)gains.push({r:meta,n:n,v:v});
+  }
+  gains.sort((a,b)=>b.n-a.n);
+  const topGains=gains.slice(0,6);
+  document.getElementById('ovGainCnt').textContent=topGains.length?'top '+topGains.length:'0';
+  document.getElementById('ovGainBody').innerHTML=!topGains.length
+    ?'<tr><td colspan="5" class="empty"><span class="empty-icon">—</span><div class="empty-text">No sales recorded yesterday</div></td></tr>'
+    :topGains.map(g=>'<tr'+_ovRowAttr(g.r)+'><td>'+raCell(g.r.org,g.r.dst,g.r.cor)+'</td><td>'+fDateS(g.r.depDate)+'</td><td style="color:var(--text3)">'+g.r.sched+'</td><td class="d-pos" style="font-weight:800">+'+g.n+'</td><td style="color:var(--text2)">$'+Math.round(g.v).toLocaleString()+'</td></tr>').join('');
+
+  // Our fare moves vs yesterday's 5 AM scrape (priorPpbMap built at boot).
+  const fareMoves=[];
+  try{
+    (Array.isArray(ppbFares)?ppbFares:[]).forEach(r=>{
+      const cor=(r.Corridor||'').trim(), dir=(r.Direction||'').trim();
+      const dd=(r['Dep Date']||'').trim(), sch=(r.Schedule||'').toString().trim();
+      if(!cor||!dd||!sch)return;
+      const dep=_parseMDYY(dd); if(!dep||dep<today)return;
+      const cur=parseFloat(String(r.Fare||'').replace(/[^0-9.]/g,''));
+      const prior=priorPpbMap[cor+'|'+dir+'|'+dd+'|'+sch];
+      if(!isFinite(cur)||prior==null)return;
+      const delta=cur-prior;
+      if(Math.abs(delta)>=0.5)fareMoves.push({cor:cor,dir:dir,dd:dd,sch:sch,cur:cur,prior:prior,delta:delta,dep:dep});
+    });
+  }catch(_){/* fares not loaded */}
+  fareMoves.sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+  const topMoves=fareMoves.slice(0,6);
+  document.getElementById('ovFareCnt').textContent=fareMoves.length;
+  document.getElementById('ovFareBody').innerHTML=!topMoves.length
+    ?'<tr><td colspan="4" class="empty"><span class="empty-icon">=</span><div class="empty-text">No fare changes vs yesterday&rsquo;s scrape</div></td></tr>'
+    :topMoves.map(m=>{
+      const col=m.delta>0?'var(--good)':'var(--bad)';
+      const corName=(typeof odPair==='function')?odPair(m.cor,m.dir):(m.cor+' '+m.dir);
+      return '<tr><td>'+corName+'</td><td>'+m.dd+'</td><td style="color:var(--text3)">'+m.sch+'</td>'
+        +'<td style="font-family:\'JetBrains Mono\',monospace">$'+m.prior.toFixed(0)+' &rarr; <b style="color:'+col+'">$'+m.cur.toFixed(0)+'</b></td></tr>';
     }).join('');
+  if(typeof renderOvApplied==='function')renderOvApplied();
+
+  // ── Morning KPI hero row ──
+  const todayTrips=snapData.filter(r=>r.depDate&&r.depDate.toISOString().slice(0,10)===todayISO);
+  const todayTix=todayTrips.reduce((s,r)=>s+(r.tix||0),0);
+  let raiseCount=null;
+  try{
+    if(Array.isArray(ppbFares)&&ppbFares.length&&typeof buildTripRows==='function'){
+      raiseCount=buildTripRows().rows.filter(r=>r.action==='Raise').length;   // returns {rows, todayBandPax}
+    }
+  }catch(_){/* suggestions data not ready — show — */}
+  document.getElementById('ovKpis').innerHTML=
+    mkpi('Booked Yesterday',ydTix?ydTix.toLocaleString():'—','green',ydRev?'$'+Math.round(ydRev).toLocaleString()+' revenue':'tickets sold (3099)')+
+    mkpi('Departures Today',todayTrips.length,'',todayTix.toLocaleString()+' tickets so far')+
+    mkpi('Full — Needs Decision',needsAction.length,needsAction.length?'red':'green','single bus at capacity')+
+    mkpi('Raise Suggestions',raiseCount!=null?raiseCount:'—','yellow','pending on Suggestions tab')+
+    mkpi('Cancel Candidates',cancelList.length,cancelList.length?'red':'green','under 4 tix, within 2 days');
 
   // Filling Fast: top 10 by 3-day gain
   const repTs=[...new Set(allData.filter(r=>r.repDate).map(r=>r.repDate.getTime()))].sort((a,b)=>a-b);
@@ -2287,7 +2473,7 @@ function renderOverview(){
       const cfg=CORRIDORS[t.cor]||{color:'#888'};
       const v=t.vals;
       const c0=v[0]!==null?v[0]:'—',c1=v[1]!==null?v[1]:'—',c2=v[2]!==null?v[2]:'—';
-      return '<tr><td><span class="rdot" style="background:'+cfg.color+'"></span>'+t.org+'<span class="ra-arrow">&#8594;</span>'+t.dst+'</td>'
+      return '<tr'+_ovRowAttr(t)+'><td><span class="rdot" style="background:'+cfg.color+'"></span>'+t.org+'<span class="ra-arrow">&#8594;</span>'+t.dst+'</td>'
         +'<td>'+fDateS(t.depDate)+'</td><td>'+fTime(t.time)+'</td><td style="color:var(--text3)">'+t.sched+'</td>'
         +'<td>'+c0+'</td><td>'+c1+'</td><td><strong>'+c2+'</strong></td>'
         +'<td class="d-pos" style="font-weight:800">+'+t.gain+'</td></tr>';
@@ -2315,6 +2501,41 @@ function renderOverview(){
       +'</tr>';
   }
   document.getElementById('ovWeekBody').innerHTML=weekHtml||'<tr><td colspan="6" class="empty">—</td></tr>';
+}
+
+// M/D/YY → Date (midnight local); null on parse failure. Used by the
+// Since-Yesterday fare-move panel to keep only future departures.
+function _parseMDYY(s){
+  const m=String(s||'').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(!m)return null;
+  let y=+m[3]; if(y<100)y+=2000;
+  return new Date(y, +m[1]-1, +m[2]);
+}
+
+// "Applied via Dashboard — 48h" panel. Fills async once fetchAppliedHistory
+// has pulled /log (called from there AND from renderOverview so whichever
+// finishes last paints the real data).
+function renderOvApplied(){
+  const body=document.getElementById('ovAppliedBody');
+  const cnt=document.getElementById('ovAppliedCnt');
+  if(!body)return;
+  const hist=(typeof __appliedHistory==='object'&&__appliedHistory)?Object.values(__appliedHistory):[];
+  const cut=new Date(Date.now()-48*3600*1000);
+  const recent=hist.filter(e=>e.ts&&new Date(e.ts)>=cut)
+                   .sort((a,b)=>String(b.ts).localeCompare(String(a.ts)))
+                   .slice(0,6);
+  if(cnt)cnt.textContent=recent.length;
+  if(!recent.length){
+    body.innerHTML='<tr><td colspan="3" class="empty"><span class="empty-icon">—</span><div class="empty-text">No fare changes applied in the last 48h</div></td></tr>';
+    return;
+  }
+  body.innerHTML=recent.map(e=>{
+    const when=String(e.ts).slice(5,16).replace('T',' ');
+    const trip=(typeof odPair==='function'?odPair(e.corridor,e.direction):(e.corridor||''))+' '+(e.date||'')+' <span style="color:var(--text3)">'+(e.schedule||'')+'</span>';
+    const src=e.source==='manual'?' <span style="color:#d8b4fe;font-size:9px">MANUAL</span>':'';
+    return '<tr><td style="color:var(--text3);font-family:\'JetBrains Mono\',monospace;font-size:11px">'+when+'</td><td>'+trip+src+'</td>'
+      +'<td style="font-family:\'JetBrains Mono\',monospace">$'+e.fare+' &rarr; <b>$'+e.target+'</b></td></tr>';
+  }).join('');
 }
 
 
@@ -4223,6 +4444,8 @@ async function fetchAppliedHistory(){
     if(document.getElementById('panel-suggestions')?.classList.contains('active')){
       renderFares();
     }
+    // Overview's "Applied via Dashboard" panel feeds off the same history (2026-07-08)
+    if(typeof renderOvApplied==='function')renderOvApplied();
   } catch(_){ /* server offline — leave history empty */ }
 }
 
@@ -4299,7 +4522,7 @@ async function renderChangeHistory(force){
       +mkpi('Last 30 days',last30.length,'green',cnt(last30,'suggestion')+' suggestions · '+cnt(last30,'manual')+' manual')
       +mkpi('Error lines',errLines,errLines?'red':'','failed row-writes in log')
     +'</div>'
-    +'<div style="display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:24px;align-items:start">'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px;align-items:start">'
       +'<div><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">By month</div>'
         +'<table style="border-collapse:collapse;font-size:12px"><thead><tr>'
         +'<th style="text-align:left;padding:0 10px 4px 0;color:var(--text3);font-size:10px;font-weight:600">MONTH</th>'
@@ -5049,6 +5272,10 @@ function exportReport(){
             const fare= parseFloat((r.Fare||r.fare||'').replace(/[^0-9.]/g,''))||null;
             if (cor && dd && fare !== null) priorPpbMap[cor+'|'+dir+'|'+dd+'|'+sch] = fare;
           });
+          // Overview's "Our Fare Moves" panel compares against priorPpbMap, but
+          // renderOverview already ran inside loadDash() BEFORE this block filled
+          // the map — repaint now that yesterday's fares exist. (2026-07-08)
+          if (typeof renderOverview === 'function') renderOverview();
         }
       }
     } catch(pe) { console.warn('Prior fare load failed:', pe); }
