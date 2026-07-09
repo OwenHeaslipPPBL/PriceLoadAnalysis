@@ -2298,6 +2298,52 @@ function _ovRowAttr(r){
   return ' class="ov-row-link" title="Open in Loads" onclick="ovGo(\''+String(r.cor||'').replace(/'/g,'')+'\',\''+String(r.sched).trim()+'\',\''+iso+'\')"';
 }
 
+// ── KPI weekday-comparison context (Owen 2026-07-08: "^10% vs the average
+//    Wednesday so far"). The ONLY quantity with an honest historical series in
+//    the embedded data is booking VELOCITY per sale-date (window.salesByDate):
+//    it survives because the 3099 manifest still covers past trips within its
+//    back-window, and a sale's trip departs on/after the sale date so nothing
+//    rolled off → unbiased. So "Booked Yesterday" gets a true weekday delta.
+//    The other KPIs (departures/cancel snapshots, DCC needs-decision, live-fare
+//    raises) have NO surviving daily series — process_2501 archives past trips
+//    to their FINAL snapshot, destroying the historical morning state — so they
+//    show today-context, not a fabricated delta. A tiny daily overview-stats
+//    history file would give all five real weekday baselines within ~2 weeks;
+//    proposed to Owen (needs his call on Python-vs-live-JS baseline basis).
+//    Thin history: n===1 → "vs last <Wkdy>", n>=2 → "vs avg <Wkdy> · Nwk".
+const _OV_DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function _ovVelocityByDate(){
+  const sbd=window.salesByDate||{},per={};
+  for(const k in sbd){const days=sbd[k];for(const d in days){per[d]=(per[d]||0)+((days[d]&&days[d].n)||0);}}
+  return per;
+}
+// Compare a live measured value to the same-weekday baseline from perByIso.
+function _ovWkDelta(perByIso,measured,weekday,todayIso,excludeIso,maxBackDays){
+  const cutoff=maxBackDays?new Date(todayIso+'T00:00:00').getTime()-maxBackDays*864e5:null;
+  const samples=[];
+  for(const iso in perByIso){
+    if(iso===excludeIso||iso>=todayIso)continue;
+    const dt=new Date(iso+'T00:00:00');
+    if(dt.getDay()!==weekday)continue;
+    if(cutoff!=null&&dt.getTime()<cutoff)continue;
+    samples.push(perByIso[iso]);
+  }
+  if(!samples.length)return{dow:weekday,n:0};
+  const avg=samples.reduce((a,b)=>a+b,0)/samples.length;
+  if(avg<=0)return{dow:weekday,n:samples.length,noavg:true};
+  return{dow:weekday,n:samples.length,avg:avg,pct:Math.round((measured-avg)/avg*100)};
+}
+// Render a colored comparison line. higherGood flips red/green (more cancels = bad).
+function _ovCmpLine(delta,higherGood,what){
+  if(!delta||delta.n===0||delta.noavg)return '<span style="color:var(--text3)">baseline building&hellip;</span>';
+  const p=delta.pct,flat=p===0,up=p>0,good=flat?false:(up===!!higherGood);
+  const col=flat?'var(--text3)':(good?'var(--good)':'var(--bad)');
+  const arw=flat?'&#9644;':(up?'&#9650;':'&#9660;');
+  const base=delta.n===1?('vs last '+_OV_DOW[delta.dow]):('vs avg '+_OV_DOW[delta.dow]+' &middot; '+delta.n+'wk');
+  return '<span style="color:'+col+';font-weight:700">'+arw+Math.abs(p)+'%'+(what?' '+what:'')+'</span> <span style="color:var(--text3)">'+base+'</span>';
+}
+function _ovNote(cmpHtml,descHtml){return '<div style="margin-bottom:2px">'+cmpHtml+'</div><div style="opacity:.7">'+descHtml+'</div>';}
+
 function renderOverview(){
   const cap=parseInt(document.getElementById('cap').value)||54;
   const today=new Date();today.setHours(0,0,0,0);
@@ -2430,21 +2476,38 @@ function renderOverview(){
     }).join('');
   if(typeof renderOvApplied==='function')renderOvApplied();
 
-  // ── Morning KPI hero row ──
+  // ── Morning KPI hero row (each card carries a weekday-comparison context
+  //    line where an honest historical baseline exists — 2026-07-08) ──
   const todayTrips=snapData.filter(r=>r.depDate&&r.depDate.toISOString().slice(0,10)===todayISO);
   const todayTix=todayTrips.reduce((s,r)=>s+(r.tix||0),0);
-  let raiseCount=null;
+  let raiseCount=null,lowerCount=null,holdCount=null;
   try{
     if(Array.isArray(ppbFares)&&ppbFares.length&&typeof buildTripRows==='function'){
-      raiseCount=buildTripRows().rows.filter(r=>r.action==='Raise').length;   // returns {rows, todayBandPax}
+      const _rr=buildTripRows().rows;   // buildTripRows returns {rows, todayBandPax}
+      raiseCount=_rr.filter(r=>r.action==='Raise').length;
+      lowerCount=_rr.filter(r=>r.action==='Lower').length;
+      holdCount =_rr.filter(r=>r.action==='Hold' ).length;
     }
-  }catch(_){/* suggestions data not ready — show — */}
+  }catch(_){/* suggestions data not ready */}
+
+  // Booked Yesterday: real weekday delta from booking velocity (the one KPI with
+  // an honest embedded baseline). The rest carry today-context, not a fake delta.
+  const _bookedDelta=_ovWkDelta(_ovVelocityByDate(), ydTix, new Date(ydISO+'T00:00:00').getDay(), todayISO, ydISO, 21);
+  // Today-context helpers for the KPIs without a weekday baseline:
+  const _todayLoadPct=todayTrips.length?Math.round(todayTix/(todayTrips.length*cap)*100):0;
+  const _cancelToday=cancelList.filter(r=>Math.ceil((r.depDate-today)/864e5)===0).length;
+
   document.getElementById('ovKpis').innerHTML=
-    mkpi('Booked Yesterday',ydTix?ydTix.toLocaleString():'—','green',ydRev?'$'+Math.round(ydRev).toLocaleString()+' revenue':'tickets sold (3099)')+
-    mkpi('Departures Today',todayTrips.length,'',todayTix.toLocaleString()+' tickets so far')+
-    mkpi('Full — Needs Decision',needsAction.length,needsAction.length?'red':'green','single bus at capacity')+
-    mkpi('Raise Suggestions',raiseCount!=null?raiseCount:'—','yellow','pending on Suggestions tab')+
-    mkpi('Cancel Candidates',cancelList.length,cancelList.length?'red':'green','under 4 tix, within 2 days');
+    mkpi('Booked Yesterday', ydTix?ydTix.toLocaleString():'—', 'green',
+      _ovNote(_ovCmpLine(_bookedDelta,true,''), ydRev?'$'+Math.round(ydRev).toLocaleString()+' revenue':'tickets sold (3099)'))+
+    mkpi('Departures Today', todayTrips.length, '',
+      _ovNote('<span style="color:var(--text3)">avg '+_todayLoadPct+'% full so far</span>', todayTix.toLocaleString()+' tickets this morning'))+
+    mkpi('Full &mdash; Needs Decision', needsAction.length, needsAction.length?'red':'green',
+      _ovNote('<span style="color:var(--text3)">'+needsAction.length+' of '+soldRaw.length+' full &middot; rest already multi-bus</span>','single bus &mdash; raise or add bus'))+
+    mkpi('Raise Suggestions', raiseCount!=null?raiseCount:'—', 'yellow',
+      _ovNote(raiseCount!=null?('<span style="color:var(--text3)">'+(lowerCount||0)+' lower also flagged</span>'):'<span style="color:var(--text3)">&mdash;</span>','pending on Suggestions tab'))+
+    mkpi('Cancel Candidates', cancelList.length, cancelList.length?'red':'green',
+      _ovNote((_cancelToday?'<span style="color:var(--bad);font-weight:700">'+_cancelToday+' depart today</span>':'<span style="color:var(--text3)">none depart today</span>'), 'under 4 tix, within 2 days'));
 
   // Filling Fast: top 10 by 3-day gain
   const repTs=[...new Set(allData.filter(r=>r.repDate).map(r=>r.repDate.getTime()))].sort((a,b)=>a-b);
