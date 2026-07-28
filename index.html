@@ -24,9 +24,9 @@
   --bos:#4fc3f7; --prov:#67e8f9; --phi:#FEEB14; --dc:#d8b4fe;
   /* fill cell bg tints */
   --fill-none:rgba(28,35,30,0.05);
-  --fill-hi:rgba(6,136,60,0.28);
-  --fill-sold:rgba(255,255,255,0.92);
-  --fill-dbl:rgba(254,235,20,0.18);
+  --fill-hi:rgba(6,136,60,0.16);
+  --fill-sold:#06883C;
+  --fill-dbl:rgba(161,98,7,0.16);
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 html{scroll-behavior:smooth;}
@@ -223,11 +223,11 @@ table.pivot tbody tr:hover td.s3{background:var(--surface2);}
 .fill-cell-piv:hover{filter:brightness(1.2);}
 .fc-none{background:var(--fill-none);color:var(--text3);}
 .fc-empty{background:transparent;color:var(--text3);opacity:.35;font-weight:300;}
-.fc-hi{background:var(--fill-hi);color:#86efac;font-weight:700;}
-.fc-sold{background:var(--fill-sold);color:#000;font-weight:800;}
-.fc-dbl{background:var(--fill-dbl);color:var(--yellow);font-weight:700;}
-.fc-tpl{background:rgba(249,115,22,0.42);color:#fed7aa;font-weight:800;}
-.fc-quad{background:rgba(234,88,12,0.62);color:#fff;font-weight:800;}
+.fc-hi{background:var(--fill-hi);color:#0b5a2c;font-weight:700;}
+.fc-sold{background:var(--fill-sold);color:#ffffff;font-weight:800;}
+.fc-dbl{background:var(--fill-dbl);color:#7a4a06;font-weight:700;}
+.fc-tpl{background:rgba(249,115,22,0.22);color:#9a3412;font-weight:800;}
+.fc-quad{background:rgba(194,65,12,0.88);color:#ffffff;font-weight:800;}
 
 /* route col text */
 .route-text{display:flex;align-items:center;gap:5px;padding:0 10px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;width:160px;}
@@ -273,7 +273,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 
 /* BADGE */
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;font-family:'Exo 2',sans-serif;}
-.b-g{background:rgba(34,197,94,0.12);color:#22c55e;} .b-a{background:rgba(245,158,11,0.12);color:#f59e0b;} .b-r{background:rgba(239,68,68,0.12);color:#ef4444;}
+.b-g{background:rgba(34,197,94,0.12);color:#22c55e;} .b-a{background:rgba(180,83,9,0.10);color:#92400e;} .b-r{background:rgba(239,68,68,0.12);color:#ef4444;}
 .b-dbl{background:rgba(254,235,20,0.12);color:var(--yellow);border:1px solid rgba(254,235,20,0.25);}
 .b-match{background:rgba(249,115,22,0.12);color:#f97316;}
 .dbl-badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:800;text-transform:uppercase;background:rgba(254,235,20,0.15);color:var(--yellow);border:1px solid rgba(254,235,20,0.3);font-family:'Exo 2',sans-serif;margin-left:4px;}
@@ -323,14 +323,14 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 .recco-row:last-child{border-bottom:none;}
 .empty-text{font-size:12px;}
 /* OD TOOLTIP */
-#od-tip{position:fixed;background:rgba(22,22,22,0.96);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;font-size:12px;pointer-events:none;z-index:9999;max-width:320px;min-width:200px;max-height:80vh;overflow-y:auto;box-shadow:0 6px 24px rgba(0,0,0,.8);display:none;}
+#od-tip{position:fixed;background:#1c231e;color:#e8efe9;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.14);border-radius:8px;padding:10px 14px;font-size:12px;pointer-events:none;z-index:9999;max-width:320px;min-width:200px;max-height:80vh;overflow-y:auto;box-shadow:0 14px 34px -12px rgba(28,35,30,.5);display:none;}
 #od-tip.show{display:block;}
-#od-tip .od-head{font-weight:700;color:var(--good);margin-bottom:7px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;}
-#od-tip .od-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:3px 0;border-bottom:1px solid rgba(28,35,30,0.05);}
+#od-tip .od-head{font-weight:700;color:#7fd6a2;margin-bottom:7px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;}
+#od-tip .od-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.10);}
 #od-tip .od-row:last-of-type{border-bottom:none;}
-#od-tip .od-seg{color:var(--text2);font-size:11px;}
-#od-tip .od-cnt{font-weight:700;color:var(--text);font-size:13px;white-space:nowrap;}
-#od-tip .od-foot{color:var(--text3);font-size:10px;padding-top:6px;margin-top:4px;border-top:1px solid rgba(28,35,30,0.05);}
+#od-tip .od-seg{color:#b9c6bd;font-size:11px;}
+#od-tip .od-cnt{font-weight:700;color:#f2f6f3;font-size:13px;white-space:nowrap;}
+#od-tip .od-foot{color:#94a497;font-size:10px;padding-top:6px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.14);}
 /* MOMENTUM VIEW TOGGLE */
 .view-toggle{display:flex;gap:4px;}
 .mom-view-btn{background:var(--surface3);border:1px solid var(--border);color:var(--text2);padding:5px 11px;border-radius:4px;cursor:pointer;font-size:12px;transition:all .15s;}
@@ -360,7 +360,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 .trend-wrap{display:inline-flex;align-items:center;gap:6px;}
 .spark{display:block;}
 .accel{display:inline-block;font-size:14px;font-weight:700;min-width:12px;text-align:center;}
-.accel-up{color:#22c55e;}
+.accel-up{color:#15803d;}
 .accel-dn{color:var(--bad);}
 .accel-flat{color:var(--text3);font-weight:400;}
 /* Momentum cells between cumulative day cells */
@@ -368,10 +368,10 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 .mom-cell{text-align:center;font-weight:600;cursor:pointer;color:var(--text2);font-size:12px;padding:0 2px;}
 .mom-cell:hover:not(.mom-zero){background:rgba(28,35,30,0.05);}
 .mom-zero{color:var(--text3);font-weight:400;cursor:default;font-size:11px;opacity:.5;}
-.mom-low{color:#94a3b8;font-size:11px;}      /* 1-2 tickets: subtle, slate */
-.mom-mid{color:#7dd3fc;font-size:12px;}      /* 3-5 tickets: sky */
-.mom-hi{color:#4ade80;font-size:13px;}       /* 6-9 tickets: green */
-.mom-vhi{color:#22c55e;font-size:14px;}      /* 10+: bold green, no glow */
+.mom-low{color:#64748b;font-size:11px;}      /* 1-2 tickets: subtle, slate */
+.mom-mid{color:#0369a1;font-size:12px;}      /* 3-5 tickets: sky */
+.mom-hi{color:#15803d;font-size:13px;}       /* 6-9 tickets: green */
+.mom-vhi{color:#0b5a2c;font-size:14px;font-weight:700;}      /* 10+: bold green, no glow */
 .mom-neg{color:var(--bad);font-size:12px;}    /* negative delta (cancellations) */
 .bc-now{color:var(--good);font-weight:600;}
 
