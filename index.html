@@ -2767,6 +2767,22 @@ function tixCls(t,c){const p=t/c;return p>=0.75?'t-hi':p>=0.4?'t-md':'t-lo';}
 // Cell color class. `doubled` is the SAME flag used to render the ×2 badge — passing it in
 // keeps the yellow color and the badge perfectly in sync. (Old behavior used tix>56 here,
 // which diverged from tripStatus and showed yellow without ×2 or vice versa.)
+// ── Single source of truth for a trip's capacity (2026-07-28) ────────────────
+// Returns the TRUE committed seats from the morning DCC scrape (ops Seats) for
+// this specific trip; falls back to the flat baseline only when DCC has no record
+// (past trips aged out of DCC's window, unscraped routes). Used by every render
+// function so Loads / Overview / Momentum / RPM can never disagree about capacity.
+// 54 is only ~65% of the fleet — 29% are 51-seat coaches, and doubles run
+// 102/105/107/108/110/112 rather than a flat 54x2.
+function trueCap(tix, sched, dateISO, fallback){
+  const f = fallback || PPB_CAPACITY;
+  if(!sched || !dateISO) return f;
+  try { return effectiveCapacity(tix, sched, dateISO) || f; }
+  catch(_) { return f; }
+}
+// Date -> YYYY-MM-DD (local-safe) for trueCap lookups.
+function capISO(d){ return d && d.toISOString ? d.toISOString().slice(0,10) : (d||''); }
+
 function pivCls(tix,cap,doubled,busCount){if(!tix)return'fc-none';if(doubled){const bc=busCount||2;return bc>=4?'fc-quad':bc===3?'fc-tpl':'fc-dbl';}if(tix>=cap)return'fc-sold';if(tix>=35)return'fc-hi';return'fc-none';}
 
 function mkpi(label,val,cls,note){
@@ -3086,7 +3102,9 @@ function renderOverview(){
   // an honest embedded baseline). The rest carry today-context, not a fake delta.
   const _bookedDelta=_ovWkDelta(_ovVelocityByDate(), ydTix, new Date(ydISO+'T00:00:00').getDay(), todayISO, ydISO, 21);
   // Today-context helpers for the KPIs without a weekday baseline:
-  const _todayLoadPct=todayTrips.length?Math.round(todayTix/(todayTrips.length*cap)*100):0;
+  // Weighted against each trip's TRUE committed seats (DCC), not trips x 54. (2026-07-28)
+  const _todayCapSum=todayTrips.reduce((s,r)=>s+trueCap(r.tix, r.sched, capISO(r.depDate), cap),0);
+  const _todayLoadPct=_todayCapSum?Math.round(todayTix/_todayCapSum*100):0;
   const _cancelToday=cancelList.filter(r=>Math.ceil((r.depDate-today)/864e5)===0).length;
 
   document.getElementById('ovKpis').innerHTML=
@@ -3142,7 +3160,7 @@ function renderOverview(){
     const dk=day.toISOString().slice(0,10);
     const dayTrips=snapData.filter(r=>r.depDate&&r.depDate.toISOString().slice(0,10)===dk);
     const tix=dayTrips.reduce((s,r)=>s+r.tix,0);
-    const sold=dayTrips.filter(r=>r.tix>=cap).length;
+    const sold=dayTrips.filter(r=>r.tix>=trueCap(r.tix, r.sched, dk, cap)).length;
     const cancel=dayTrips.filter(r=>r.tix<4).length;
     const dateLabel=day.toLocaleDateString('en-US',{month:'numeric',day:'numeric'});
     const rowStyle=i===0?'style="background:rgba(254,235,20,0.05)"':'';
@@ -3721,14 +3739,16 @@ function renderMomentum(){
     const fareDisp=fare!=null?`$${fare.toFixed(2)}`:'<span style="color:var(--text3)">—</span>';
     let row=`<tr><td>${raCell(trip.org,trip.dst,trip.cor)}</td><td>${fTime(trip.time)}</td>`+
             `<td style="color:var(--text3)">${trip.sched}</td>`;
+    // TRUE committed seats for THIS trip (DCC) drive the fill % + trend scale. (2026-07-28)
+    const _tCap=trueCap(cum[cum.length-1], trip.sched, selDate, cap);
     cum.forEach((v,i)=>{
-      row+=bcCell(v,cap,false);
+      row+=bcCell(v,_tCap,false);
       if(i<cum.length-1){
         row+=momCell(deltas[i],trip.sched,calDates[i+1]);
       }
     });
     row+=`<td class="fare-col">${fareDisp}</td>`;
-    row+=`<td class="trend-col">${trendCell(cum,deltas,cap)}</td>`;
+    row+=`<td class="trend-col">${trendCell(cum,deltas,_tCap)}</td>`;
     row+='</tr>';return row;
   }).join('');
 }
@@ -3886,7 +3906,10 @@ function renderWatchlist(){
       }
       // Doubled flag via tripStatus (fare-aware) so 2nd-bus trips with low tix show ×2 too.
       const _ws=tripStatus(r.tix, r.sched, r.depDate?r.depDate.toISOString().slice(0,10):'');
-      const doubled=_ws.doubled,_wbc=_ws.busCount||(doubled?2:1),effCap=cap*_wbc;
+      // TRUE committed seats (DCC) rather than wCap x buses; the wCap control still
+      // governs the user's cancel/add-capacity FLAG thresholds. (2026-07-28)
+      const doubled=_ws.doubled,_wbc=_ws.busCount||(doubled?2:1),
+            effCap=trueCap(r.tix, r.sched, capISO(r.depDate), cap*_wbc);
       const pct=Math.min(Math.round(r.tix/effCap*100),100);
       const fc=doubled?(_wbc>=4?'#fb923c':_wbc===3?'#fbbf24':'var(--yellow)'):fillColor(pct);
       const dblTag=_wbc>1?'<span class="dbl-badge">&times;'+_wbc+'</span>':'';
@@ -3927,7 +3950,7 @@ function renderRPM(){
       sched:r.sched, org:r.org, dst:r.dst, cor:r.cor, dir:r.dir,
       depDate:r.depDate, time:r.time,
       pax:r.tix, rev:r.rev, miles:r.miles||0,
-      load:r.tix/cap*100,
+      load:r.tix/trueCap(r.tix, r.sched, capISO(r.depDate), cap)*100,   // TRUE DCC seats (2026-07-28)
       rpm:(r.miles>0)?r.rev/r.miles:0
     }));
     tripRows.sort((a,b)=>{
@@ -3947,7 +3970,7 @@ function renderRPM(){
     if(kEl)kEl.innerHTML=
       mkpi('Trips Shown',tripRows.length.toLocaleString(),'','completed departures')
       +mkpi('Total PAX',totPaxT.toLocaleString(),'green','passengers carried')
-      +mkpi('Avg Load',avgLoadT+'%',avgLoadT>=65?'green':avgLoadT>=35?'yellow':'red','of '+cap+'-seat capacity')
+      +mkpi('Avg Load',avgLoadT+'%',avgLoadT>=65?'green':avgLoadT>=35?'yellow':'red','of committed seats (DCC)')
       +mkpi('Total Revenue',fMoney(totRevT),'cream','completed trips')
       +mkpi('Avg Rev / Mile','$'+(totMiT>0?(totRevT/totMiT).toFixed(2):'—'),'yellow','all corridors');
     if(hEl)hEl.innerHTML='<tr>'
@@ -3983,15 +4006,17 @@ function renderRPM(){
   const groupMap={};
   filtered.forEach(r=>{
     const k=r.cor;
-    if(!groupMap[k])groupMap[k]={label:r.cor,org:r.org,dst:r.dst,cor:r.cor,trips:0,pax:0,rev:0,miles:0};
+    if(!groupMap[k])groupMap[k]={label:r.cor,org:r.org,dst:r.dst,cor:r.cor,trips:0,pax:0,rev:0,miles:0,capSum:0};
     groupMap[k].trips+=1;
     groupMap[k].pax+=r.tix;
     groupMap[k].rev+=r.rev;
     groupMap[k].miles+=r.miles||0;
+    // Accumulate TRUE committed seats so avgLoad is pax ÷ real capacity, not trips×54. (2026-07-28)
+    groupMap[k].capSum+=trueCap(r.tix, r.sched, capISO(r.depDate), cap);
   });
   const rows=Object.values(groupMap).map(r=>{
     r.avgPax=r.trips?r.pax/r.trips:0;
-    r.avgLoad=r.trips?(r.pax/(r.trips*cap))*100:0;
+    r.avgLoad=r.capSum?(r.pax/r.capSum)*100:0;
     r.rpm=r.miles>0?r.rev/r.miles:0;
     return r;
   });
@@ -4022,11 +4047,12 @@ function renderRPM(){
   const totRev=rows.reduce((s,r)=>s+r.rev,0);
   const totMiles=rows.reduce((s,r)=>s+r.miles,0);
   const overallRpm=totMiles>0?totRev/totMiles:0;
-  const avgLoad=totTrips>0?Math.round((totPax/(totTrips*cap))*100):0;
+  const totCap=rows.reduce((s,r)=>s+(r.capSum||0),0);   // TRUE seats across all groups (2026-07-28)
+  const avgLoad=totCap>0?Math.round((totPax/totCap)*100):0;
   if(kEl)kEl.innerHTML=
     mkpi('Completed Trips',totTrips.toLocaleString(),'','latest snapshot')
     +mkpi('Total PAX',totPax.toLocaleString(),'green','passengers carried')
-    +mkpi('Avg Load',avgLoad+'%',avgLoad>=65?'green':avgLoad>=35?'yellow':'red','of '+cap+'-seat capacity')
+    +mkpi('Avg Load',avgLoad+'%',avgLoad>=65?'green':avgLoad>=35?'yellow':'red','of committed seats (DCC)')
     +mkpi('Total Revenue',fMoney(totRev),'cream','completed trips')
     +mkpi('Avg Rev / Mile','$'+overallRpm.toFixed(2),'yellow','all corridors');
 
