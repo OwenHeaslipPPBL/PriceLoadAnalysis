@@ -3171,7 +3171,7 @@ function renderOvApplied(){
   body.innerHTML=recent.map(e=>{
     const when=String(e.ts).slice(5,16).replace('T',' ');
     const trip=(typeof odPair==='function'?odPair(e.corridor,e.direction):(e.corridor||''))+' '+(e.date||'')+' <span style="color:var(--text3)">'+(e.schedule||'')+'</span>';
-    const src=e.source==='manual'?' <span style="color:#d8b4fe;font-size:9px">MANUAL</span>':'';
+    const src=e.source==='manual'?' <span style="color:#7e22ce;font-size:9px">MANUAL</span>':'';
     return '<tr><td style="color:var(--text3);font-family:\'JetBrains Mono\',monospace;font-size:11px">'+when+'</td><td>'+trip+src+'</td>'
       +'<td style="font-family:\'JetBrains Mono\',monospace">$'+e.fare+' &rarr; <b>$'+e.target+'</b></td></tr>';
   }).join('');
@@ -5145,7 +5145,7 @@ async function renderChangeHistory(force){
   const monthRows=months.map(m=>{
     const b=byMonth[m], tot=b.manual+b.suggestion+b.untracked;
     return '<tr><td style="padding:4px 10px 4px 0;color:var(--text2);font-family:\'JetBrains Mono\',monospace">'+m+'</td>'
-      +'<td style="padding:4px 10px;text-align:right;color:#4fc3f7">'+(b.suggestion||'·')+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:#075985">'+(b.suggestion||'·')+'</td>'
       +'<td style="padding:4px 10px;text-align:right;color:#d8b4fe">'+(b.manual||'·')+'</td>'
       +'<td style="padding:4px 10px;text-align:right;color:var(--text3)">'+(b.untracked||'·')+'</td>'
       +'<td style="padding:4px 0 4px 10px;text-align:right;color:var(--cream);font-weight:600">'+tot+'</td></tr>';
