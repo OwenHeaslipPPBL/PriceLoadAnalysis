@@ -630,6 +630,14 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
     .pp-foot-rule svg:last-of-type { height:15px; }
   }
 
+
+  /* Pricing's boot screen reuses its existing .overlay (so its own show/hide
+     logic is untouched) but must look identical to the other dashboards. */
+  .overlay { gap:0 !important; }
+  .overlay .ov-logo { text-align:center; }
+  .overlay .ov-loading { display:none !important; }
+  .overlay.nodata .pp-route, .overlay.nodata .pp-status { display:none; }
+  .overlay.nodata .pp-loader-inner { margin-bottom:26px; }
 </style>
 </head>
 <body>
@@ -731,20 +739,26 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 
 <div class="overlay" id="overlay">
   <div class="ov-logo">
-      <div class="pp-stage" aria-hidden="true">
-      <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1933"/></svg>
-      <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1947"/></svg>
-      <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1975"/></svg>
-      <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1995"/></svg>
-      <svg class="pp-bus" viewBox="0 0 200 76"><use href="#dNow"/></svg>
-    </div>
+    <div class="pp-loader-inner">
+      <div class="pp-ghost" id="ppLoaderTitle">Pricing</div>
 
-    <div class="pp-year" aria-hidden="true">
-      <span>1933</span><span>1947</span><span>1975</span><span>1995</span><span>TODAY</span>
-    </div>
+      <div class="pp-stage" aria-hidden="true">
+        <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1933"/></svg>
+        <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1947"/></svg>
+        <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1975"/></svg>
+        <svg class="pp-bus" viewBox="0 0 200 74"><use href="#d1995"/></svg>
+        <svg class="pp-bus" viewBox="0 0 200 76"><use href="#dNow"/></svg>
+      </div>
+
+      <div class="pp-year" aria-hidden="true">
+        <span>1933</span><span>1947</span><span>1975</span><span>1995</span><span>TODAY</span>
+      </div>
+
       <div class="pp-route" aria-hidden="true"></div>
-      <div class="ov-sub">Load Capacity Analysis Dashboard</div>
+
+      <div class="pp-status"><span class="pp-spin"></span><span id="ppStatus">Loading latest data</span></div>
     </div>
+  </div>
   <div class="drop-zone" id="dz">
     <input type="file" accept=".csv" onchange="handleFile(this)">
     <span class="drop-icon">🚌</span>
