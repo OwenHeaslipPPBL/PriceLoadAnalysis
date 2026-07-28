@@ -323,14 +323,14 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 .recco-row:last-child{border-bottom:none;}
 .empty-text{font-size:12px;}
 /* OD TOOLTIP */
-#od-tip{position:fixed;background:#1c231e;color:#e8efe9;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.14);border-radius:8px;padding:10px 14px;font-size:12px;pointer-events:none;z-index:9999;max-width:320px;min-width:200px;max-height:80vh;overflow-y:auto;box-shadow:0 14px 34px -12px rgba(28,35,30,.5);display:none;}
+#od-tip{position:fixed;background:#f1f4f2;color:var(--text);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;font-size:12px;pointer-events:none;z-index:9999;max-width:320px;min-width:200px;max-height:80vh;overflow-y:auto;box-shadow:0 14px 34px -12px rgba(28,35,30,.5);display:none;}
 #od-tip.show{display:block;}
-#od-tip .od-head{font-weight:700;color:#7fd6a2;margin-bottom:7px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;}
-#od-tip .od-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.10);}
+#od-tip .od-head{font-weight:700;color:var(--green2);margin-bottom:7px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;}
+#od-tip .od-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:3px 0;border-bottom:1px solid var(--border);}
 #od-tip .od-row:last-of-type{border-bottom:none;}
-#od-tip .od-seg{color:#b9c6bd;font-size:11px;}
-#od-tip .od-cnt{font-weight:700;color:#f2f6f3;font-size:13px;white-space:nowrap;}
-#od-tip .od-foot{color:#94a497;font-size:10px;padding-top:6px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.14);}
+#od-tip .od-seg{color:var(--text2);font-size:11px;}
+#od-tip .od-cnt{font-weight:700;color:var(--text);font-size:13px;white-space:nowrap;}
+#od-tip .od-foot{color:var(--text3);font-size:10px;padding-top:6px;margin-top:4px;border-top:1px solid var(--border);}
 /* MOMENTUM VIEW TOGGLE */
 .view-toggle{display:flex;gap:4px;}
 .mom-view-btn{background:var(--surface3);border:1px solid var(--border);color:var(--text2);padding:5px 11px;border-radius:4px;cursor:pointer;font-size:12px;transition:all .15s;}
@@ -451,7 +451,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 [data-tip]{position:relative;}
 [data-tip]:hover::after,[data-tip]:focus-visible::after{
   content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);left:50%;
-  transform:translateX(-50%);background:var(--text);color:#f4f7f4;
+  transform:translateX(-50%);background:#f1f4f2;color:var(--text);border:1px solid var(--border2);
   font-family:'DM Sans',sans-serif;font-size:11.5px;font-weight:500;
   letter-spacing:.1px;text-transform:none;line-height:1.45;text-align:left;
   padding:7px 11px;border-radius:7px;white-space:normal;width:max-content;
@@ -460,7 +460,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 [data-tip]:hover::before,[data-tip]:focus-visible::before{
   content:'';position:absolute;bottom:calc(100% + 2px);left:50%;
   transform:translateX(-50%);border:5px solid transparent;
-  border-top-color:var(--text);z-index:400;pointer-events:none;}
+  border-top-color:var(--border2);z-index:400;pointer-events:none;}
 
 /* canonical sub-tabs — identical rule to Safety + Vehicle Status */
 .rpm-tog-btn.rpm-tog-btn, .mom-view-btn.mom-view-btn, .chip.chip{
@@ -490,7 +490,6 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
   .lineage-row svg:last-child { height:28px; }
   .tabs-meta { margin-left:auto; display:flex; align-items:center; gap:10px; flex:0 0 auto; }
   .tabs-meta .report-chip { font-size:11px; padding:4px 11px; white-space:nowrap; }
-  .tabs-meta .export-btn { display:inline-flex !important; }
   /* ============================================================
      PP LOADER — drop-in boot screen for every dashboard.
      The fleet generations double as the progress indicator:
@@ -775,7 +774,6 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
   <button class="tab-btn" data-tab="fleet" onclick="switchTab(this)" style="display:none">Fleet Utilization</button>
   <div class="tabs-meta">
     <div class="report-chip" id="rChip">Loading...</div>
-    <button class="export-btn" id="exportBtn" style="display:none" onclick="exportDash()">&#8615; Export</button>
   </div>
 </div>
 
