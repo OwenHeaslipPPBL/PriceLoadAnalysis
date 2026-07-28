@@ -3408,12 +3408,19 @@ function renderLoads(){
     return m!=null?m:r.tix;
   };
   const totalTix=inRange.reduce((s,r)=>s+effTix(r),0);
-  const allPcts=inRange.map(r=>effTix(r)/cap*100);
+  // Per-trip TRUE capacity from DCC committed Seats (2026-07-28, Owen: capacity
+  // should come from the morning DCC scrape, not a flat 54). effectiveCapacity()
+  // returns ops.seats when DCC has the trip (54 is only 65% of the fleet — 29% are
+  // 51-seat coaches, plus 20/48/52/56-seat vehicles, and doubles are 102/105/110/112,
+  // not always 108). Falls back to PPB_CAPACITY for trips outside DCC's window.
+  const capOf=r=>effectiveCapacity(effTix(r), r.sched,
+                  r.depDate?r.depDate.toISOString().slice(0,10):'') || cap;
+  const allPcts=inRange.map(r=>effTix(r)/capOf(r)*100);
   const avgFill=allPcts.length?Math.round(allPcts.reduce((a,b)=>a+b,0)/allPcts.length):0;
   // Doubled count uses tripStatus (fare-aware): catches trips with a 2nd bus
   // attached even before they cross 56 tix sold.
   const doubled=inRange.filter(r=>tripStatus(effTix(r),r.sched,r.depDate?r.depDate.toISOString().slice(0,10):'').doubled).length;
-  const low=inRange.filter(r=>effTix(r)/cap<LOW_LOAD_PCT).length;
+  const low=inRange.filter(r=>effTix(r)/capOf(r)<LOW_LOAD_PCT).length;
   // KPI strip rendered AFTER dayStats below so it can include the filter-aware
   // Total Revenue + Rev/Mile cards (2026-07-07 — the long-promised RPM cards).
 
@@ -3430,7 +3437,11 @@ function renderLoads(){
     const totalTix=vals.reduce((s,v)=>s+v,0);
     const tripCount=dayTrips.length;
     const avgTix=tripCount?totalTix/tripCount:0;
-    const avgPct=cap?Math.round(avgTix/cap*100):0;
+    // Day load % = day's total tix ÷ day's total TRUE capacity (DCC seats per trip),
+    // weighted rather than an average-of-averages, so a 51-seat coach and a 108-seat
+    // double each count for what they actually carry. (2026-07-28)
+    const dayCap=dayTrips.reduce((s,t)=>s+(effectiveCapacity(t.byDate[dk], t.sched, dk)||cap),0);
+    const avgPct=dayCap?Math.round(totalTix/dayCap*100):0;
     let soldOut=0, doubled=0, dayRev=0, dayMiles=0;
     dayTrips.forEach(t=>{
       const s=tripStatus(t.byDate[dk], t.sched, dk);
@@ -3461,7 +3472,7 @@ function renderLoads(){
   document.getElementById('loadKpis').innerHTML=
     mkpi('Trips (window)',trips.length,'','unique schedules')+
     mkpi('Total Tickets',totalTix.toLocaleString(),'green',isPast?'tickets sold':'in date window')+
-    mkpi('Avg Load',avgFill+'%',avgFill>=75?'green':avgFill>=40?'yellow':'red','of '+cap+'-seat capacity')+
+    mkpi('Avg Load',avgFill+'%',avgFill>=75?'green':avgFill>=40?'yellow':'red','of committed seats (DCC)')+
     mkpi('Total Revenue',winRev>0?'$'+Math.round(winRev).toLocaleString():'—','green',isPast?'final (3099 ticket values)':'booked so far — climbs as trips fill')+
     mkpi('Rev / Mile',winRpm!=null?'$'+winRpm.toFixed(2):'—','',isPast?'final · operated miles':'booked so far · operated miles')+
     mkpi('Multi-Bus Runs',doubled,'yellow','2+ buses (incl. triples/quads)')+
@@ -3511,9 +3522,11 @@ function renderLoads(){
         const st=tripStatus(tix, trip.sched, dk);
         const doubled=st.doubled;
         const bc=st.busCount||(doubled?2:1);
-        const effCap=cap*bc;
+        // TRUE committed capacity from DCC (ops Seats) — not 54×buses. A double is
+        // often 102/105/110/112, and a single is frequently a 51-seat coach. (2026-07-28)
+        const effCap=effectiveCapacity(tix, trip.sched, dk)||(cap*bc);
         const pct=Math.round(tix/effCap*100);
-        const cls=pivCls(tix,cap,doubled,bc);   // multi-bus heat ramp: ×2 yellow, ×3 orange, ×4 deep orange
+        const cls=pivCls(tix,effCap,doubled,bc);   // sold-out shading vs TRUE seats; multi-bus heat ramp ×2 yellow, ×3 orange, ×4 deep orange
         row+=`<td style="cursor:pointer" onmouseenter="showODTip(event,'${trip.sched}','${dk}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()"><div class="fill-cell-piv ${cls}">${tix}${bc>1?'<span style="font-size:8px;margin-left:2px">×'+bc+'</span>':''}</div></td>`;
       }
     });
