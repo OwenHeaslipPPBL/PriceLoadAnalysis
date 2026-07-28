@@ -638,6 +638,24 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
   .overlay .ov-loading { display:none !important; }
   .overlay.nodata .pp-route, .overlay.nodata .pp-status { display:none; }
   .overlay.nodata .pp-loader-inner { margin-bottom:26px; }
+
+  /* ---- back to the front door (every dashboard, top-left) ---- */
+  .hdr-left { display:flex; align-items:center; gap:16px; min-width:0; }
+  .pp-home {
+    display:inline-flex; align-items:center; gap:7px; flex:none;
+    font-family:'Archivo',sans-serif; font-size:11px; font-weight:700;
+    letter-spacing:1.2px; text-transform:uppercase; text-decoration:none;
+    color:var(--text3); background:var(--surface);
+    border:1px solid var(--border2); border-radius:999px; padding:6px 13px;
+    white-space:nowrap; transition:color .13s, border-color .13s, background .13s;
+  }
+  .pp-home:hover, .pp-home:focus-visible { color:var(--green2); border-color:var(--green); }
+  .pp-home .pp-home-arrow { font-size:13px; line-height:1; }
+  @media (max-width:860px) {
+    .hdr-left { gap:10px; }
+    .pp-home { padding:5px 10px; font-size:10px; letter-spacing:.8px; }
+    .pp-home .pp-home-label { display:none; }
+  }
 </style>
 </head>
 <body>
@@ -734,7 +752,10 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 </svg>
 
 <header class="header">
-  <div class="ghost-line">Pricing</div>
+  <div class="hdr-left">
+    <a class="pp-home" href="https://ppb-landing.pages.dev" title="Back to all dashboards"><span class="pp-home-arrow">&larr;</span><span class="pp-home-label">Dashboards</span></a>
+    <div class="ghost-line">Pricing</div>
+  </div>
 </header>
 
 <div class="overlay" id="overlay">
