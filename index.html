@@ -1577,6 +1577,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
     <div class="rpm-toggle" id="fuSubNav" style="margin-bottom:14px">
       <button class="rpm-tog-btn active" onclick="setFuSub('overview',this)">Overview</button>
       <button class="rpm-tog-btn" onclick="setFuSub('heatmap',this)">Bus &times; Weekday Heat Map</button>
+      <button class="rpm-tog-btn" onclick="setFuSub('weekly',this)">Weekly Utilization</button>
     </div>
     <div id="fuSubOverview">
     <div class="settings-bar">
@@ -1678,6 +1679,37 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
       <div id="fuHmNote" class="muted" style="font-size:11px;margin-top:8px"></div>
       <div id="fuHmLegend" style="margin-top:8px"></div>
       <div class="table-wrap" style="max-height:640px;overflow:auto;margin-top:10px"><table id="fuHmTable" style="border-collapse:collapse;font-size:11px"></table></div>
+    </div>
+
+    <!-- ── WEEKLY UTILIZATION (Colm Lynch request 2026-07-29) ──────────────────
+         Rows = weeks (Mon-Sun), three column blocks per his Excel mock-up:
+         Fleet Used / Fleet Not Used / % Used, one column per weekday.
+         Date-range selector + CSV export (opens directly in Excel). -->
+    <div id="fuSubWeekly" style="display:none">
+      <div class="settings-bar">
+        <span class="set-label">From</span>
+        <div class="set-val"><input type="date" id="fuWkFrom" onchange="renderFuWeekly()"
+             style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:4px 8px;font-family:'JetBrains Mono',monospace;font-size:12px"></div>
+        <span class="set-label">To</span>
+        <div class="set-val"><input type="date" id="fuWkTo" onchange="renderFuWeekly()"
+             style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:4px 8px;font-family:'JetBrains Mono',monospace;font-size:12px"></div>
+        <div class="fsep"></div>
+        <span class="set-label">Location</span>
+        <div class="set-val"><select id="fuWkLoc" onchange="renderFuWeekly()"
+             style="background:var(--surface);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:4px 8px;font-size:12px"></select></div>
+        <div class="fsep"></div>
+        <span class="set-label">Used</span>
+        <div class="set-val muted" id="fuWkThresh">&gt; 25 mi/day</div>
+        <div class="fsep"></div>
+        <button class="rpm-tog-btn" onclick="exportFuWeekly()"
+                data-tip="Download this table as CSV — opens directly in Excel."
+                aria-label="Download this table as CSV — opens directly in Excel."
+                style="border:1px solid var(--border2)">&#8615; Export CSV</button>
+      </div>
+      <div id="fuWkNote" class="muted" style="font-size:11px;margin-bottom:8px"></div>
+      <div class="table-wrap" style="max-height:640px;overflow:auto">
+        <table id="fuWkTable" style="border-collapse:collapse;font-size:12px;white-space:nowrap"></table>
+      </div>
     </div>
   </div>
 
@@ -6494,10 +6526,177 @@ function renderFuBusTable(C, d, period){
 function setFuSub(which, btn){
   __fuSub = which;
   if(btn && btn.parentElement) btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active', b===btn));
-  const ov=document.getElementById('fuSubOverview'), hm=document.getElementById('fuSubHeatmap');
+  const ov=document.getElementById('fuSubOverview'), hm=document.getElementById('fuSubHeatmap'),
+        wk=document.getElementById('fuSubWeekly');
   if(ov) ov.style.display = which==='overview' ? '' : 'none';
   if(hm) hm.style.display = which==='heatmap' ? '' : 'none';
+  if(wk) wk.style.display = which==='weekly'  ? '' : 'none';
   if(which==='heatmap') renderFuHeatmap();
+  if(which==='weekly')  renderFuWeekly();
+}
+
+// ── WEEKLY UTILIZATION (Colm Lynch request 2026-07-29) ───────────────────────
+// Week (Mon-Sun) x weekday matrix: Fleet Used / Fleet Not Used / % Used.
+// "Used" = ran more than the Saucon threshold (25 mi) that day — the same rule the
+// rest of the Fleet tab uses, so this table can't disagree with the other views.
+// Denominator = ACTIVE buses (dormant excluded), optionally filtered to one
+// location; Used + Not Used always equals that fleet count, mirroring Colm's sheet.
+var __fuWkRows = null;     // cached for the CSV export
+
+function _fuWkDow(d){ return (d.getDay()+6)%7; }              // 0=Mon .. 6=Sun
+function _fuWkISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function _fuWkParse(s){ const [y,m,d]=String(s).split('-').map(Number); return new Date(y,m-1,d); }
+function _fuWkLabel(mon){
+  const sun=new Date(mon); sun.setDate(sun.getDate()+6);
+  const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const a=M[mon.getMonth()]+' '+mon.getDate();
+  const b=(mon.getMonth()===sun.getMonth()? String(sun.getDate()) : M[sun.getMonth()]+' '+sun.getDate());
+  return a+'-'+b;
+}
+
+function computeFuWeekly(){
+  const fu = loadFu() || {};
+  const dates = fu.dates || [], panel = fu.panel || {}, roster = fu.roster || [];
+  if(!dates.length) return null;
+  const thresh = (fu.threshold_miles != null) ? +fu.threshold_miles : 25;
+
+  const locSel = document.getElementById('fuWkLoc');
+  const loc = locSel ? locSel.value : 'all';
+  const buses = roster.filter(b => b && b.active && (loc==='all' || b.division===loc))
+                      .map(b => b.name);
+
+  // date-range filter (inputs default to the full available window)
+  const fEl=document.getElementById('fuWkFrom'), tEl=document.getElementById('fuWkTo');
+  const from = fEl && fEl.value ? fEl.value : dates[0];
+  const to   = tEl && tEl.value ? tEl.value : dates[dates.length-1];
+
+  const weeks = {};   // mondayISO -> {dowIdx -> usedCount}
+  dates.forEach((ds, i) => {
+    if(ds < from || ds > to) return;
+    const d = _fuWkParse(ds);
+    const mon = new Date(d); mon.setDate(mon.getDate() - _fuWkDow(d));
+    const key = _fuWkISO(mon);
+    if(!weeks[key]) weeks[key] = {};
+    let used = 0;
+    for(const b of buses){
+      const arr = panel[b];
+      if(arr && i < arr.length && (+arr[i] || 0) > thresh) used++;
+    }
+    weeks[key][_fuWkDow(d)] = used;
+  });
+
+  const rows = Object.keys(weeks).sort().map(k => ({
+    monday: k, label: _fuWkLabel(_fuWkParse(k)), used: weeks[k], fleet: buses.length
+  }));
+  return { rows, fleet: buses.length, thresh, from, to,
+           windowStart: dates[0], windowEnd: dates[dates.length-1] };
+}
+
+function renderFuWeekly(){
+  const fu = loadFu() || {};
+  const tbl = document.getElementById('fuWkTable');
+  const note = document.getElementById('fuWkNote');
+  if(!tbl) return;
+
+  // one-time control setup: location list + date bounds/defaults
+  const locSel = document.getElementById('fuWkLoc');
+  if(locSel && !locSel.options.length){
+    const divs = [...new Set((fu.roster||[]).filter(b=>b&&b.active&&b.division).map(b=>b.division))].sort();
+    locSel.innerHTML = '<option value="all">All locations</option>' +
+                       divs.map(d=>`<option value="${d}">${d}</option>`).join('');
+  }
+  const dates = fu.dates || [];
+  if(dates.length){
+    const f=document.getElementById('fuWkFrom'), t=document.getElementById('fuWkTo');
+    [f,t].forEach(el=>{ if(el){ el.min=dates[0]; el.max=dates[dates.length-1]; } });
+    if(f && !f.value) f.value = dates[0];
+    if(t && !t.value) t.value = dates[dates.length-1];
+  }
+
+  const data = computeFuWeekly();
+  __fuWkRows = data;
+  if(!data || !data.rows.length){
+    tbl.innerHTML = '<tr><td class="empty">No fleet data in this range.</td></tr>';
+    if(note) note.textContent = '';
+    return;
+  }
+  const th=document.getElementById('fuWkThresh'); if(th) th.textContent = '> '+data.thresh+' mi/day';
+
+  const DOWS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const bd = 'border:1px solid var(--border2)';
+  const hcell = (t,extra)=>`<th style="${bd};padding:5px 9px;text-align:center;font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);${extra||''}">${t}</th>`;
+
+  // two header rows: block titles, then weekday names under each block
+  let head = `<thead><tr><th style="${bd};padding:5px 9px;background:var(--surface2);position:sticky;left:0;z-index:2"></th>`
+           + hcell('Fleet Used','background:rgba(34,197,94,.10);color:var(--good)') .replace('<th','<th colspan="7"')
+           + `<th style="${bd};border-top:none;border-bottom:none;width:10px"></th>`
+           + hcell('Fleet Not Used','background:rgba(239,68,68,.08);color:var(--bad)').replace('<th','<th colspan="7"')
+           + `<th style="${bd};border-top:none;border-bottom:none;width:10px"></th>`
+           + hcell('% Used','background:rgba(254,235,20,.08);color:var(--yellow)').replace('<th','<th colspan="7"')
+           + `</tr><tr>` + hcell('Week','background:var(--surface2);position:sticky;left:0;z-index:2;text-align:left');
+  for(let blk=0; blk<3; blk++){
+    DOWS.forEach(d=>{ head += hcell(d); });
+    if(blk<2) head += `<th style="${bd};border-top:none;border-bottom:none"></th>`;
+  }
+  head += '</tr></thead>';
+
+  const pctCol = p => p==null ? 'var(--text3)' : (p>=60?'var(--good)':p>=45?'var(--yellow)':'var(--bad)');
+  const body = data.rows.map(r=>{
+    let tr = `<tr><td style="${bd};padding:5px 9px;font-weight:600;background:var(--surface);position:sticky;left:0;z-index:1">${r.label}</td>`;
+    for(let i=0;i<7;i++){ const v=r.used[i];
+      tr += `<td style="${bd};padding:5px 9px;text-align:center;color:var(--good)">${v==null?'—':v}</td>`; }
+    tr += `<td style="${bd};border-top:none;border-bottom:none"></td>`;
+    for(let i=0;i<7;i++){ const v=r.used[i];
+      tr += `<td style="${bd};padding:5px 9px;text-align:center;color:var(--text2)">${v==null?'—':(r.fleet-v)}</td>`; }
+    tr += `<td style="${bd};border-top:none;border-bottom:none"></td>`;
+    for(let i=0;i<7;i++){ const v=r.used[i]; const p = v==null?null:Math.round(v/r.fleet*100);
+      tr += `<td style="${bd};padding:5px 9px;text-align:center;font-weight:600;color:${pctCol(p)}">${p==null?'—':p+'%'}</td>`; }
+    return tr+'</tr>';
+  }).join('');
+
+  tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
+  if(note){
+    const partial = data.rows.length && (data.rows[0].monday < data.windowStart || true);
+    note.innerHTML = `Fleet = <strong>${data.fleet}</strong> active buses`
+      + (document.getElementById('fuWkLoc') && document.getElementById('fuWkLoc').value!=='all'
+         ? ` in ${document.getElementById('fuWkLoc').value}` : '')
+      + ` &middot; "Used" = ran more than ${data.thresh} mi that day (Saucon GPS)`
+      + ` &middot; Used + Not Used = ${data.fleet} every day`
+      + ` &middot; data available ${data.windowStart} to ${data.windowEnd} (rolling 90-day Saucon window)`
+      + `. Weeks are Mon-Sun; the first/last week in range may be partial (— = no data that day).`;
+  }
+}
+
+function exportFuWeekly(){
+  const data = __fuWkRows || computeFuWeekly();
+  if(!data || !data.rows.length){ alert('Nothing to export for this range.'); return; }
+  const DOWS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const esc = v => { const s=String(v==null?'':v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
+  const loc = (document.getElementById('fuWkLoc')||{}).value || 'all';
+
+  const lines = [];
+  lines.push(['Peter Pan Fleet Utilization — weekly by day of week'].map(esc).join(','));
+  lines.push([`Fleet: ${data.fleet} active buses`, `Location: ${loc}`,
+              `Used = ran > ${data.thresh} mi/day (Saucon GPS)`,
+              `Range: ${data.from} to ${data.to}`].map(esc).join(','));
+  lines.push('');
+  lines.push((['', 'Fleet Used','','','','','','', '', 'Fleet Not Used','','','','','','', '', '% Used']).map(esc).join(','));
+  lines.push((['Week', ...DOWS, '', ...DOWS, '', ...DOWS]).map(esc).join(','));
+  data.rows.forEach(r=>{
+    const used = DOWS.map((_,i)=> r.used[i]==null ? '' : r.used[i]);
+    const not  = DOWS.map((_,i)=> r.used[i]==null ? '' : (r.fleet - r.used[i]));
+    const pct  = DOWS.map((_,i)=> r.used[i]==null ? '' : Math.round(r.used[i]/r.fleet*100)+'%');
+    lines.push(([r.label, ...used, '', ...not, '', ...pct]).map(esc).join(','));
+  });
+
+  const blob = new Blob(['﻿' + lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `PPB_Fleet_Utilization_${data.from}_to_${data.to}${loc!=='all'?'_'+loc.replace(/\W+/g,''):''}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
 }
 function setFuHmLoc(v){ __fuHmLoc=v; renderFuHeatmap(); }
 function setFuHmStatus(s,btn){ __fuHmStatus=s; btn.parentElement.querySelectorAll('.rpm-tog-btn').forEach(b=>b.classList.toggle('active',b===btn)); renderFuHeatmap(); }
