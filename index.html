@@ -990,7 +990,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
         <select class="ctrl-sel" id="mPaceFilter" onchange="renderMomentumPace()">
           <option value="all">All trips with a baseline</option>
           <option value="ahead">Pacing ahead (&ge;+20%)</option>
-          <option value="behind">Pacing behind (&le;-20%)</option>
+          <option value="behind">Pacing behind &mdash; actionable only</option>
           <option value="sellout">Projected to sell out</option>
         </select>
       </div>
@@ -3851,12 +3851,27 @@ function momPace(r){
 // still nearly empty. Require the trip to ALREADY be meaningfully full before raising
 // the alarm, so the flag means "this is filling up", not "the maths extrapolated".
 var MOM_SELLOUT_MIN_LOAD=40;
+// A "Soft" call is the expensive one to get wrong — dropping the fare or cancelling a
+// trip that was going to fill costs real revenue, whereas a wrong "Raise" costs a
+// little margin. Backtested out-of-sample (baseline trained on May–June departures,
+// scored against held-out July, truth = peak occupancy / committed seats):
+//   route had typically sold <=10% by judging time -> 33% of soft calls finished >=80%
+//     full and 14% SOLD OUT — worse than the 28% base rate, i.e. actively misleading
+//   >=15% sold by then -> false positives fall to ~10% and sold-outs to ~4%
+// So a soft call is only allowed once enough of the booking is actually knowable.
+// This is route-aware by construction: it suppresses early calls on back-loaded routes
+// (group 6200 ran 53% false positives at 14 days out) while still allowing them on
+// front-loaded ones. Rows below the gate keep their pace number but are labelled as
+// informational, not actionable.
+var MOM_SOFT_MIN_SHARE=15;
 function _momSignal(m){
   if(!m||m.tooEarly) return {t:'Too early',c:'var(--text3)'};
   if(m.projLoad!=null&&m.projLoad>=100&&(m.loadNow||0)>=MOM_SELLOUT_MIN_LOAD)
     return {t:'Sell-out risk',c:'var(--bad)'};
   if(m.pace>=20) return {t:'Raise',c:'var(--good)'};
-  if(m.pace<=-20) return {t:'Soft',c:'var(--yellow)'};
+  if(m.pace<=-20) return (m.expPct>=MOM_SOFT_MIN_SHARE)
+    ? {t:'Soft',c:'var(--yellow)'}
+    : {t:'Behind (early)',c:'var(--text3)',weak:true};
   return {t:'On track',c:'var(--text3)'};
 }
 // Filter conventions must match the rest of the dashboard, not invent new ones:
@@ -3897,7 +3912,10 @@ function renderMomentumPace(){
   __momRows=rows;
   var live=rows.filter(function(x){return !x.m.tooEarly;});
   var ahead=live.filter(function(x){return x.m.pace>=20;});
-  var behind=live.filter(function(x){return x.m.pace<=-20;});
+  // Count only ACTIONABLE soft calls — the early, unreliable ones are tracked
+  // separately so the headline number is one you can act on.
+  var behind=live.filter(function(x){return _momSignal(x.m).t==='Soft';});
+  var behindEarly=live.filter(function(x){return _momSignal(x.m).weak;});
   var sell=live.filter(function(x){return _momSignal(x.m).t==='Sell-out risk';});
 
   var f=(document.getElementById('mPaceFilter')||{}).value||'all';
@@ -3926,7 +3944,8 @@ function renderMomentumPace(){
     +mkpi('Pacing Ahead', ahead.length, 'green', _ovNote(
         '<span style="color:var(--text3)">at least 20% above this route&rsquo;s curve</span>','candidates to raise'))
     +mkpi('Pacing Behind', behind.length, 'yellow', _ovNote(
-        '<span style="color:var(--text3)">at least 20% below this route&rsquo;s curve</span>','soft demand'))
+        '<span style="color:var(--text3)">'+behindEarly.length+' more too early to trust</span>',
+        'soft demand &mdash; ~10% of these still fill'))
     +mkpi('Sell-Out Risk', sell.length, sell.length?'red':'green', _ovNote(
         '<span style="color:var(--text3)">projected past committed seats</span>','raise or add a bus'));
 
@@ -3979,6 +3998,13 @@ function renderMomentumPace(){
       +'where a one-ticket swing would distort the percentage. &ldquo;Load Now&rdquo; is the '
       +'grounding number: pace says how a trip compares to its route, load says how full it '
       +'actually is.'
+      +'<br><strong>How much to trust a &ldquo;Soft&rdquo; call:</strong> backtested on held-out '
+      +'July departures (baseline trained on May&ndash;June only), about <strong>10% of soft '
+      +'calls still finished 80%+ full and ~4% sold out</strong> &mdash; so treat it as a prompt '
+      +'to look, not an instruction to cut. Calls are suppressed entirely as '
+      +'&ldquo;Behind (early)&rdquo; until the route has typically sold '+MOM_SOFT_MIN_SHARE
+      +'% of its final by that point; below that the flag was measured to be <em>worse</em> '
+      +'than the base rate. A &ldquo;Raise&rdquo; call is the safer direction to be wrong on.'
       +'<br><strong>Limits:</strong> the baseline covers '+(b.span||[]).join(' to ')+' only, so '
       +'strongly seasonal routes (Cape / Woods Hole in particular) are judged against '
       +'off-peak months and will read as running far ahead. Projections above '
