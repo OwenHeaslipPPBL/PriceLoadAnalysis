@@ -849,6 +849,12 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 
     <!-- Since Yesterday — overnight movement (Option B) -->
     <div class="ov-section">
+      <div class="ov-sec-head">&#128506; Corridor Health &mdash; Forward Book</div>
+      <div class="corridor-grid" id="ovCorridorCards"></div>
+      <div class="note" id="ovCorridorNote" style="margin-top:10px"></div>
+    </div>
+
+    <div class="ov-section">
       <div class="ov-sec-head"><span class="ov-sec-label">&#127749; Since Yesterday &mdash; Overnight Movement</span></div>
       <div class="ov-3col">
         <div class="ov-panel">
@@ -3033,6 +3039,8 @@ function renderOverview(){
         (_cancelToday?'<span style="color:var(--bad);font-weight:700">'+_cancelToday+' depart today</span>':'<span style="color:var(--text3)">none depart today</span>'),
         'under 4 tix, within 2 days'));
 
+  renderCorridorHealth();
+
   // Filling Fast: top 10 by 3-day gain
   const repTs=[...new Set(allData.filter(r=>r.repDate).map(r=>r.repDate.getTime()))].sort((a,b)=>a-b);
   const last3=repTs.slice(-3).map(t=>new Date(t));
@@ -4032,6 +4040,142 @@ function exportMomentumPace(){
   a.href=URL.createObjectURL(blob);
   a.download='ppb_booking_pace_'+new Date().toISOString().slice(0,10)+'.csv';
   document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+
+
+// ── Per-corridor health cards (Overview)  2026-07-30 ────────────────────────
+// Backlog 0c Option C. One glance at "which corridors need attention", built
+// entirely from signals we already compute — no new math, so a card can never
+// disagree with the tab it summarises.
+//   Forward load = booked tickets / TRUE committed seats (DCC) across future trips
+//   Pace         = the Momentum engine's counts, using its GATED signals, so the
+//                  soft number here matches the backtested-reliable one
+//   vs FlixBus   = median fare gap on matched future trips (only the 4 scraped
+//                  corridors have this; the rest honestly show a dash)
+//   $/mi         = 2501 revenue / operated miles on trips that ALREADY RAN. Using
+//                  future trips would read "booked so far" and make every corridor
+//                  look unprofitable — the documented Future-vs-Past RPM trap.
+// Load is measured over a NEAR window, not the whole forward book. Averaging load
+// across all 70 forward days made every corridor read 5-17% — because ~38% of tickets
+// sell on the departure day, a far-out trip is empty by definition, so the number was
+// really measuring how far ahead each schedule extends. Over the next 7 days the
+// figure means something and corridors become comparable.
+var CH_MIN_TRIPS=5, CH_RPM_DAYS=14, CH_LOAD_DAYS=7;
+function corridorHealthRows(){
+  var t=new Date(); t.setHours(0,0,0,0);
+  var rpmCut=new Date(t.getTime()-CH_RPM_DAYS*864e5);
+
+  // Flix gap joined on SCHEDULE+DATE, not corridor name: buildTripRows speaks
+  // 'Boston'/'DC' while snapData speaks 'Boston <-> NYC'. Joining on the name
+  // would silently match nothing.
+  var gapBy={};
+  try{
+    var br=buildTripRows();
+    ((br&&br.rows)||[]).forEach(function(r){
+      if(r.gapPct!=null&&r.schedule&&r.dateISO)
+        gapBy[String(r.schedule).trim()+'|'+r.dateISO]=r.gapPct;
+    });
+  }catch(_){}
+
+  var by={};
+  function slot(c){
+    if(!by[c]) by[c]={cor:c,trips:0,nearTrips:0,tix:0,cap:0,gaps:[],raise:0,soft:0,sell:0,
+                      pastRev:0,pastMiles:0,pastTrips:0};
+    return by[c];
+  }
+  var loadCut=new Date(t.getTime()+CH_LOAD_DAYS*864e5);
+  snapData.forEach(function(r){
+    if(!r.cor||!r.depDate||r.depDate<t) return;
+    var iso=capISO(r.depDate), o=slot(r.cor);
+    o.trips++;
+    // Load: near window only. Pace/sell-out below deliberately span the FULL forward
+    // book — a sell-out risk three weeks out is still worth surfacing.
+    if(r.depDate<loadCut){
+      o.nearTrips++; o.tix+=(+r.tix||0);
+      o.cap+=trueCap(+r.tix||0,r.sched,iso,cap)||0;
+    }
+    var g=gapBy[String(r.sched).trim()+'|'+iso];
+    if(g!=null) o.gaps.push(g);
+    if(typeof momPace==='function'){
+      var m=momPace(r);
+      if(m&&!m.tooEarly){
+        var sg=_momSignal(m);
+        if(sg.t==='Raise') o.raise++;
+        else if(sg.t==='Soft') o.soft++;
+        else if(sg.t==='Sell-out risk') o.sell++;
+      }
+    }
+  });
+  // $/mi from trips that actually ran, in the recent window only
+  pastSnapData.forEach(function(r){
+    if(!r.cor||!r.depDate||r.depDate<rpmCut) return;
+    var o=by[r.cor]; if(!o) return;
+    var st=tripStatus(+r.tix||0,r.sched,capISO(r.depDate));
+    var bc=(st&&st.busCount)||1;
+    o.pastRev+=(+r.rev||0); o.pastMiles+=(+r.miles||0)*bc; o.pastTrips++;
+  });
+
+  var out=[];
+  for(var c in by){
+    var o=by[c];
+    if(o.trips<CH_MIN_TRIPS) continue;
+    o.load=o.cap?Math.round(o.tix/o.cap*100):null;
+    o.gap=o.gaps.length?_chMedian(o.gaps):null;
+    o.rpm=o.pastMiles>0?(o.pastRev/o.pastMiles):null;
+    out.push(o);
+  }
+  // Weakest forward book first — this panel exists to surface what needs attention.
+  out.sort(function(a,b){ return (a.load==null?999:a.load)-(b.load==null?999:b.load); });
+  return out;
+}
+function _chMedian(a){
+  var s=a.slice().sort(function(x,y){return x-y;});
+  var n=s.length; if(!n) return null;
+  return n%2?s[(n-1)/2]:Math.round((s[n/2-1]+s[n/2])/2);
+}
+function renderCorridorHealth(){
+  var host=document.getElementById('ovCorridorCards'); if(!host) return;
+  var note=document.getElementById('ovCorridorNote');
+  var rows=corridorHealthRows();
+  if(!rows.length){ host.innerHTML='<div class="note">No corridor has enough forward trips yet.</div>';
+                    if(note) note.innerHTML=''; return; }
+  var loadCol=function(p){ return p==null?'var(--text3)':(p>=55?'var(--good)':p>=30?'var(--yellow)':'var(--bad)'); };
+  host.innerHTML=rows.map(function(o){
+    var cfg=(typeof CORRIDORS!=='undefined'&&CORRIDORS[o.cor])||{color:'#888'};
+    var gapTxt = o.gap==null ? '<span style="color:var(--text3)">&mdash;</span>'
+      : '<span style="color:'+(o.gap>0?'var(--bad)':'var(--good)')+'">'
+        +(o.gap>0?'+':'')+o.gap+'%</span>';
+    var paceTxt = (o.raise||o.soft)
+      ? '<span style="color:var(--good)">'+o.raise+'&uarr;</span> <span style="color:var(--text3)">/</span> '
+        +'<span style="color:var(--yellow)">'+o.soft+'&darr;</span>'
+      : '<span style="color:var(--text3)">&mdash;</span>';
+    var rpmTxt = o.rpm==null ? '<span style="color:var(--text3)">&mdash;</span>'
+      : '<span style="color:var(--text2)">$'+o.rpm.toFixed(2)+'</span>';
+    var row=function(k,v){ return '<div style="display:flex;justify-content:space-between;'
+      +'padding:3px 0;font-size:12px"><span style="color:var(--text3)">'+k+'</span><strong>'+v+'</strong></div>'; };
+    return '<div class="ov-panel" style="border-left:3px solid '+cfg.color+';padding:11px 13px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px">'
+        +'<strong style="font-size:13px">'+o.cor+'</strong>'
+        +'<span style="color:var(--text3);font-size:11px">'+o.trips+' trips</span></div>'
+      +row('Load &middot; next '+CH_LOAD_DAYS+'d','<span style="color:'+loadCol(o.load)+'">'
+        +(o.load==null?'&mdash;':o.load+'%')+'</span>')
+      +row('Pace (ahead/soft)',paceTxt)
+      +row('vs FlixBus',gapTxt)
+      +row('$/mi &middot; last '+CH_RPM_DAYS+'d',rpmTxt)
+      +(o.sell?'<div style="margin-top:6px;font-size:11px;color:var(--bad);font-weight:600">'
+        +o.sell+' sell-out risk</div>':'')
+      +'</div>';
+  }).join('');
+  if(note) note.innerHTML='Sorted weakest first. <strong>Load</strong> is booked tickets against '
+    +'true committed seats (DCC) for departures in the next '+CH_LOAD_DAYS+' days only &mdash; '
+    +'measured across the whole forward book every corridor reads 5&ndash;17%, because ~38% of '
+    +'tickets sell on the day of departure and far-out trips are empty by definition. '
+    +'<strong>Pace</strong> and sell-out risk span the full forward book. '
+    +'<strong>Pace</strong> uses the Momentum tab&rsquo;s gated signals. '
+    +'<strong>vs FlixBus</strong> is the median fare gap (positive = we are priced above them) and '
+    +'only exists for the four corridors we scrape. <strong>$/mi</strong> deliberately uses trips that '
+    +'have ALREADY RUN over the last '+CH_RPM_DAYS+' days &mdash; a forward $/mi would count '
+    +'part-sold trips and make every corridor look unprofitable.';
 }
 
 function renderWatchlist(){
