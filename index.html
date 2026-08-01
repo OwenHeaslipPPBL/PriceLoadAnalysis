@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Peter Pan Bus Lines — Pricing Intelligence Dashboard</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#000000">
@@ -656,6 +656,50 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
     .pp-home { padding:5px 10px; font-size:10px; letter-spacing:.8px; }
     .pp-home .pp-home-label { display:none; }
   }
+
+/* ── iOS safe areas — standalone PWA (added 2026-08-01) ──────────────────────
+   Paired with viewport-fit=cover above; without that meta every env() here is 0.
+   WHY it matters only now: in Safari the browser chrome pads the notch and the
+   home indicator for you. Once the dashboard is installed to the home screen it
+   runs STANDALONE and owns the whole screen — the Dynamic Island sits over the
+   sticky header and the home-indicator bar sits over the bottom of the page.
+   env() resolves to 0 on desktop and on non-notched devices, so every calc()
+   below collapses to its original value and the desktop layout is provably
+   untouched. */
+body{
+  padding-left:env(safe-area-inset-left);
+  padding-right:env(safe-area-inset-right);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.header{
+  padding-top:env(safe-area-inset-top);
+  height:calc(78px + env(safe-area-inset-top));
+}
+/* the tabs bar sticks BELOW the header, so its offset has to grow by the same
+   inset or it parks underneath the notch */
+.tabs-bar{ top:calc(78px + env(safe-area-inset-top)); }
+
+@media (max-width:640px){
+  .header{ height:calc(56px + env(safe-area-inset-top)); }
+  .tabs-bar{ top:calc(56px + env(safe-area-inset-top)); }
+  /* modals are viewport-anchored, so they need their own home-indicator gap */
+  .modal-box,.mf-modal-box{ padding-bottom:calc(16px + env(safe-area-inset-bottom)); }
+
+  /* ── 44px tap targets (Apple HIG) ──────────────────────────────────────────
+     Measured before this rule at 393px: Export CSV 19px, Show-all 19px, the
+     Loads Future/Past + direction toggles 26px, Approve Selected 28px, the
+     Fleet sub-tabs 38px. All comfortably missable with a thumb. inline-flex +
+     centring keeps the label vertically centred as the box grows; scoped to
+     <=640px so the desktop density is untouched. */
+  button,.btn,.chip,.rpm-tog-btn,.mom-view-btn{
+    min-height:44px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  /* nav tabs scroll horizontally — give them the same thumb height */
+  .tab-btn{ min-height:44px; }
+}
 </style>
 </head>
 <body>
