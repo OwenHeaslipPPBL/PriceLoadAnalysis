@@ -436,7 +436,9 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
   /* modals: fit the screen */
   #mfModalOverlay>div,#approvalModalOverlay>div{width:96vw !important;padding:16px 14px !important;max-height:88vh;}
   /* iOS zooms the page when a focused input is <16px — bump ALL form controls */
-  input[type=text],input[type=number],input[type=password],select,.search-inp,.num-inp{font-size:16px !important;}
+  input[type=text],input[type=number],input[type=password],input[type=date],select,.search-inp,.num-inp{font-size:16px !important;}
+  /* Date/select are tap targets too — the 44px rule below only covers buttons. */
+  input[type=date],select{min-height:44px;}
   /* tooltips: cap to screen (they're hover/tap-triggered fixed boxes) */
   #od-tip{max-width:88vw;}
   /* drop-zone (dev only) + boot overlay fit small screens */
@@ -1317,10 +1319,16 @@ body{
             <input type="checkbox" id="mfIncludeInter" style="width:14px;height:14px;cursor:pointer;accent-color:var(--good)">
             <span>Include intermediate stops <span style="color:var(--text3);font-size:11px">(cascade same dollar delta)</span></span>
           </label>
-          <label data-tip="Narrow quote window to today only — change auto-expires end-of-day" aria-label="Narrow quote window to today only — change auto-expires end-of-day" style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text2);font-size:12px">
-            <input type="checkbox" id="mfSameDay" style="width:14px;height:14px;cursor:pointer;accent-color:var(--warn)">
-            <span style="color:var(--warn)">Auto-expire today</span> <span style="color:var(--text3);font-size:11px">(quote ends end-of-day)</span>
-          </label>
+          <div data-tip="Last date the new fare can be SOLD (not the travel date). After it, the normal fare model resumes. Only ever shortens the window — never extends past departure." aria-label="Last date the new fare can be sold. After it, the normal fare model resumes." style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--text2);font-size:12px">
+            <span style="color:var(--warn)">New fare sellable</span>
+            <select id="mfExpMode" onchange="onExpModeChange('mf')" style="background:rgba(28,35,30,0.05);border:1px solid var(--border2);border-radius:5px;padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
+              <option value="">until departure (default)</option>
+              <option value="today">today only</option>
+              <option value="date">through a date I pick&hellip;</option>
+            </select>
+            <input type="date" id="mfExpDate" onchange="onExpModeChange('mf')" style="display:none;background:rgba(28,35,30,0.05);border:1px solid var(--border2);border-radius:5px;padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit">
+          </div>
+          <div id="mfExpHint" style="display:none;font-size:11px;color:var(--text3);line-height:1.5;margin-top:-6px"></div>
         </div>
 
         <div style="margin-bottom:18px">
@@ -1514,10 +1522,16 @@ body{
           <input type="checkbox" id="approvalInterAll" onchange="toggleAllIntermediates(this.checked)" style="width:14px;height:14px;cursor:pointer;accent-color:var(--good)">
           Include intermediate stops <span style="color:var(--text3)">(apply to all)</span>
         </label>
-        <label data-tip="Quote window ends end-of-day (for tests). Default: quotable until departure." aria-label="Quote window ends end-of-day (for tests). Default: quotable until departure." style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text2);font-size:12px">
-          <input type="checkbox" id="approvalSameDay" style="width:14px;height:14px;cursor:pointer;accent-color:var(--warn)">
-          <span style="color:var(--warn)">Auto-expire today</span>
-        </label>
+        <div data-tip="Last date the new fare can be SOLD (not the travel date). After it, the normal fare model resumes. Only ever shortens the window — never extends past departure." aria-label="Last date the new fare can be sold. After it, the normal fare model resumes." style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--text2);font-size:12px">
+          <span style="color:var(--warn)">New fare sellable</span>
+          <select id="approvalExpMode" onchange="onExpModeChange('approval')" style="background:rgba(28,35,30,0.05);border:1px solid var(--border2);border-radius:5px;padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
+            <option value="">until departure (default)</option>
+            <option value="today">today only</option>
+            <option value="date">through a date I pick&hellip;</option>
+          </select>
+          <input type="date" id="approvalExpDate" onchange="onExpModeChange('approval')" style="display:none;background:rgba(28,35,30,0.05);border:1px solid var(--border2);border-radius:5px;padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit">
+        </div>
+        <div id="approvalExpHint" style="display:none;font-size:11px;color:var(--text3);line-height:1.5;margin-top:-4px"></div>
         <button id="approvalPreviewBtn" onclick="previewIntermediates()" style="align-self:flex-start;background:none;border:1px solid var(--border2);border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer;color:var(--text2)">Preview intermediate impact <span id="approvalPreviewSpin" style="display:none">&hellip;</span></button>
       </div>
       <div id="approvalInterPreview" style="display:none;font-size:11px;color:var(--text3);max-height:200px;overflow-y:auto;margin-bottom:14px;padding:8px;background:rgba(28,35,30,0.05);border:1px dashed var(--border2);border-radius:6px;font-family:'JetBrains Mono',monospace;line-height:1.55"></div>
@@ -5860,7 +5874,11 @@ function openApprovalModal(){
   }).join('');
   document.getElementById('approvalModalPreview').innerHTML=previewHtml;
   document.getElementById('approvalPwInput').value='';
-  document.getElementById('approvalSameDay').checked=false;  // reset to default each open
+  // Reset expiry to the safe default on every open — a date left over from a
+  // previous batch must never silently apply to the next one.
+  document.getElementById('approvalExpMode').value='';
+  document.getElementById('approvalExpDate').value='';
+  onExpModeChange('approval');
   document.getElementById('approvalErrorMsg').style.display='none';
   document.getElementById('approvalModalOverlay').style.display='flex';
   setTimeout(()=>document.getElementById('approvalPwInput').focus(),50);
@@ -5948,6 +5966,74 @@ function renderInterPreview(previews){
   }).join('');
 }
 
+// ── Fare-override expiry window ──────────────────────────────────────────────
+// BuyEnd is the last date the new fare can be SOLD — not the travel date.
+// Default (no override) = departure+1, i.e. sellable right up to departure.
+// Colm 2026-08-03: needed "valid for the next X days, then the underlying models
+// kick back in", so the operator now picks the last sellable date outright.
+// LOCAL date, deliberately not toISOString(): after ~8 PM Eastern the UTC date is
+// already tomorrow, so the old "auto-expire today" would have written TOMORROW.
+function _expLocalISO(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')
+         +'-'+String(d.getDate()).padStart(2,'0');
+}
+function _expTodayISO(){ return _expLocalISO(new Date()); }
+function _expFmt(iso){
+  var d=new Date(iso+'T00:00:00');
+  return isNaN(d.getTime())?iso:d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+}
+// Resolve the expiry for ONE change, CLAMPED to that trip's own default (dep+1).
+// The clamp is the safety property: this control can only ever NARROW a quote
+// window, never extend one past departure. Returns null = leave the default.
+function _expiryFor(mode, pickedISO, depISO){
+  if(mode==='today') return _expTodayISO();
+  if(mode!=='date' || !pickedISO) return null;
+  if(!depISO) return pickedISO;
+  var dep=new Date(depISO+'T00:00:00');
+  if(isNaN(dep.getTime())) return pickedISO;
+  dep.setDate(dep.getDate()+1);
+  return pickedISO < _expLocalISO(dep) ? pickedISO : null;
+}
+function _expValidate(mode, pickedISO){
+  if(mode!=='date') return null;
+  if(!pickedISO) return 'Pick an expiry date, or choose a different option.';
+  if(pickedISO < _expTodayISO())
+    return 'That expiry date has already passed — the new fare would never be sellable.';
+  return null;
+}
+// Manual Fare's selected row carries a display date; normalise it once so the
+// confirm screen and the submit payload can never disagree about the clamp.
+function mfDepISOFor(row){
+  if(!row) return '';
+  const dd=row['Dep Date']||'';
+  const d=new Date(dd);
+  return isNaN(d.getTime()) ? dd : _expLocalISO(d);
+}
+// Shared by both surfaces (approval modal + Manual Fare); ids are <which>ExpMode/Date/Hint.
+function onExpModeChange(which){
+  var sel=document.getElementById(which+'ExpMode'),
+      inp=document.getElementById(which+'ExpDate'),
+      hint=document.getElementById(which+'ExpHint');
+  if(!sel||!inp||!hint) return;
+  var isDate = sel.value==='date';
+  inp.style.display = isDate ? '' : 'none';
+  inp.min = _expTodayISO();
+  if(isDate && !inp.value){
+    var d=new Date(); d.setDate(d.getDate()+7); inp.value=_expLocalISO(d);
+  }
+  var msg='';
+  if(sel.value==='today'){
+    msg='Sellable today only — from tomorrow the normal fare model resumes.';
+  } else if(isDate && inp.value){
+    var nxt=new Date(inp.value+'T00:00:00'); nxt.setDate(nxt.getDate()+1);
+    msg='Sellable through '+_expFmt(inp.value)+' — from '+_expFmt(_expLocalISO(nxt))
+       +' the normal fare model resumes. Trips departing before then keep their '
+       +'normal window (this only ever shortens, never extends).';
+  }
+  hint.textContent=msg;
+  hint.style.display = msg ? '' : 'none';
+}
+
 async function submitApprovals(){
   const pw=document.getElementById('approvalPwInput').value;
   if(!pw){
@@ -5956,9 +6042,11 @@ async function submitApprovals(){
   }
   const selected=__sugLastRows.filter(r=>sugChecked.has(sugRowKey(r)));
   if(!selected.length){closeApprovalModal();return;}
-  // Same-day expiry: narrow BuyEnd to today so the override auto-expires end-of-day
-  const sameDay=document.getElementById('approvalSameDay').checked;
-  const todayISO=new Date().toISOString().slice(0,10);
+  // Expiry: narrow BuyEnd so the override self-expires and the model resumes.
+  const expMode=document.getElementById('approvalExpMode').value;
+  const expDate=document.getElementById('approvalExpDate').value;
+  const expErr=_expValidate(expMode,expDate);
+  if(expErr){ showApprovalError(expErr); return; }
   // Build change-dicts in the shape apply_fare_changes.py expects
   const changes=selected.map(r=>{
     const c={
@@ -5977,7 +6065,8 @@ async function submitApprovals(){
       source:    'suggestion',   // change_log analytics: Manual Fare sends 'manual' (2026-07-07)
       include_intermediates: __interSel.has(sugRowKey(r)),
     };
-    if(sameDay)c.buy_end_override=todayISO;
+    const be=_expiryFor(expMode,expDate,r.dateISO);
+    if(be)c.buy_end_override=be;
     return c;
   });
   const btn=document.getElementById('approvalConfirmBtn');
@@ -6671,7 +6760,9 @@ function mfPickRow(idx){
   document.getElementById('mfNewFare').value = '';
   document.getElementById('mfDelta').textContent = '';
   document.getElementById('mfIncludeInter').checked = false;
-  document.getElementById('mfSameDay').checked = false;
+  document.getElementById('mfExpMode').value = '';
+  document.getElementById('mfExpDate').value = '';
+  onExpModeChange('mf');
   document.getElementById('mfNote').value = '';
   // Scroll the composer into view
   setTimeout(() => document.getElementById('mfNewFare').focus(), 100);
@@ -6731,7 +6822,12 @@ function mfOpenConfirm(){
   const pct = curFare > 0 ? (d / curFare * 100) : 0;
   const sign = d >= 0 ? '+' : '';
   const inter = document.getElementById('mfIncludeInter').checked;
-  const sameDay = document.getElementById('mfSameDay').checked;
+  const mfExpMode = document.getElementById('mfExpMode').value;
+  const mfExpDate = document.getElementById('mfExpDate').value;
+  const mfExpErr  = _expValidate(mfExpMode, mfExpDate);
+  if (mfExpErr){ alert(mfExpErr); return; }
+  const mfDepISO  = mfDepISOFor(__mfSelected);
+  const mfBuyEnd  = _expiryFor(mfExpMode, mfExpDate, mfDepISO);
   const note = document.getElementById('mfNote').value.trim();
   const body = document.getElementById('mfConfirmBody');
   body.innerHTML =
@@ -6740,7 +6836,9 @@ function mfOpenConfirm(){
     `<span style="color:var(--text3)">$${curFare.toFixed(2)}</span> → <span style="color:var(--good);font-weight:700">$${newFare.toFixed(2)}</span>  ` +
     `<span style="color:var(--text3)">(${sign}$${d.toFixed(2)}, ${sign}${pct.toFixed(1)}%)</span><br>` +
     (inter   ? `<span style="color:var(--good)">✓ Includes intermediate stops</span><br>` : '') +
-    (sameDay ? `<span style="color:var(--warn)">✓ Auto-expires end-of-day</span><br>` : '') +
+    (mfBuyEnd ? `<span style="color:var(--warn)">✓ Sellable through ${_expFmt(mfBuyEnd)}</span><br>` : '') +
+    (mfExpMode==='date' && !mfBuyEnd
+       ? `<span style="color:var(--text3)">Expiry is on/after this trip's departure — normal window kept.</span><br>` : '') +
     (note ? `<br><span style="color:var(--text3)">Note: "${note.replace(/</g,'&lt;')}"</span>` : '');
   document.getElementById('mfPwInput').value = '';
   document.getElementById('mfErrorMsg').style.display = 'none';
@@ -6765,12 +6863,11 @@ async function mfSubmit(){
   const newFare = parseFloat(document.getElementById('mfNewFare').value);
   const curFare = parseFloat((__mfSelected.Fare || __mfSelected.fare || '').toString().replace(/[^0-9.]/g, '')) || 0;
   const cd = mfCorrDirFromRow(__mfSelected);
-  const sameDay = document.getElementById('mfSameDay').checked;
-  const todayISO = new Date().toISOString().slice(0,10);
-  // Convert depDate to ISO yyyy-mm-dd
-  const dd = __mfSelected['Dep Date'] || '';
-  const depDateObj = new Date(dd);
-  const dateISO = isNaN(depDateObj.getTime()) ? dd : depDateObj.toISOString().slice(0,10);
+  const expMode = document.getElementById('mfExpMode').value;
+  const expDate = document.getElementById('mfExpDate').value;
+  const expErr  = _expValidate(expMode, expDate);
+  if (expErr){ mfShowError(expErr); return; }
+  const dateISO = mfDepISOFor(__mfSelected);
   const note = document.getElementById('mfNote').value.trim();
   const action = newFare > curFare ? 'Raise' : (newFare < curFare ? 'Lower' : 'Hold');
   const change = {
@@ -6788,7 +6885,8 @@ async function mfSubmit(){
     source:    'manual',
     include_intermediates: document.getElementById('mfIncludeInter').checked
   };
-  if (sameDay) change.buy_end_override = todayISO;
+  const buyEnd = _expiryFor(expMode, expDate, dateISO);
+  if (buyEnd) change.buy_end_override = buyEnd;
   const btn = document.getElementById('mfSubmitBtn');
   const sp  = document.getElementById('mfSpinner');
   btn.disabled = true; sp.style.display = 'inline';
