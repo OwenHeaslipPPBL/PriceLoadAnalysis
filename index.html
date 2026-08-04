@@ -3446,7 +3446,7 @@ function showODTip(ev,sched,dateISO){
   // Replaces the Momentum tab: the projection is only actionable next to the trip
   // it belongs to, which is here.
   let projLine='';
-  const _pt=projTrendFor(sched.trim(),dateISO,_srow,4);
+  const _pt=projTrendFor(sched.trim(),dateISO,_srow,3);
   if(_pt){
     const _n=_pt.now;
     // A trip cannot sell more seats than the bus has — show a bound, not a fake number.
@@ -3455,14 +3455,19 @@ function showODTip(ev,sched,dateISO){
     const _loadTxt=_pt.projLoad==null?'':(' &middot; <span style="color:'
         +fillColor(Math.min(_pt.projLoad,100))+'">'+(_pt.projLoad>100?'100%+':_pt.projLoad+'%')+' load</span>');
     const _seq=_pt.pts.map(p=>p.proj).join(' &rarr; ');
+    // Direction only — Owen 2026-08-04: three values and an arrow. The magnitude of a
+    // projection delta is not decision-grade (it is a division by a small curve value);
+    // which WAY it is moving is.
     const _d=_pt.delta;
     const _dCol=_d>0?'var(--good)':_d<0?'var(--bad)':'var(--text3)';
-    const _dLab=_d>0?'firming':_d<0?'fading':'steady';
+    // Flat is an em-dash, NOT '→' — the values are already joined by '→', so a trailing
+    // right-arrow reads as a dangling separator rather than "no change".
+    const _dLab=_d>0?'&uarr;':_d<0?'&darr;':'&mdash;';
     projLine='<div style="margin-top:3px">Projected final: <span style="color:var(--text2)">'
       +_projTxt+' tix</span>'+_loadTxt+'</div>'
       +'<div style="margin-top:2px;color:var(--text3)">Last '+_pt.pts.length+' days: '
       +'<span style="font-family:monospace;color:var(--text2)">'+_seq+'</span> '
-      +'<span style="color:'+_dCol+';font-weight:600">'+(_d>=0?'+':'')+_d+' '+_dLab+'</span></div>';
+      +'<span style="color:'+_dCol+';font-weight:700;font-size:13px">'+_dLab+'</span></div>';
   }
   tip.innerHTML=`<div class="od-head">Sched ${sched.trim()} &middot; ${isoToMDYY(dateISO)}</div>${rows}<div class="od-foot">Total ticketed: <strong>${total}</strong>${avgFootLabel}${paceLine}${revLine}${projLine}</div>`;
   tip.classList.add('show');posODTip(ev);
