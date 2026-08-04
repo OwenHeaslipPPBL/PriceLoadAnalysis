@@ -37,6 +37,24 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
 .logo img{height:44px;display:block;}
 .logo-sub{font-family:'Exo 2',sans-serif;font-size:10px;letter-spacing:3.5px;text-transform:uppercase;color:var(--text3);margin-top:3px;font-weight:600;}
 .header-right{display:flex;align-items:center;gap:12px;}
+
+/* ---- live presence (who is viewing now) ---- */
+/* Light-theme variant of the Safety dashboard's face-pile: same shape and overlap so
+   the two products read as one system, but on a white header the ring is white and
+   the chip text is white on a saturated fill. */
+.presence{display:flex;align-items:center;}
+.pchip{
+  width:26px;height:26px;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-family:'Exo 2',sans-serif;font-size:10px;font-weight:800;letter-spacing:.5px;
+  color:#fff;border:1.5px solid transparent;
+  margin-left:-7px;box-shadow:0 0 0 2px #fff;
+  cursor:default;user-select:none;
+}
+.pchip:first-child{margin-left:0;}
+.pchip-me{box-shadow:0 0 0 2px var(--green);}
+.pchip-more{background:var(--text3);border-color:var(--text3);}
+@media (max-width:640px){ .pchip{width:23px;height:23px;font-size:9px;} }
 .report-chip{background:rgba(6,136,60,0.12);border:1px solid rgba(6,136,60,0.35);color:var(--green2);padding:5px 13px;border-radius:20px;font-size:12px;font-family:'JetBrains Mono',monospace;font-weight:500;}
 
 .export-btn{background:var(--green);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-family:'Exo 2',sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;display:none;align-items:center;gap:7px;transition:all .18s;white-space:nowrap;}
@@ -802,6 +820,9 @@ body{
     <a class="pp-home" href="https://ppb-landing.pages.dev" title="Back to all dashboards"><span class="pp-home-arrow">&larr;</span><span class="pp-home-label">Dashboards</span></a>
     <div class="ghost-line">Pricing</div>
   </div>
+  <!-- Live presence face-pile. Stays empty unless /api/room is reachable, so on a
+       local file:// preview or before the ROOM binding exists the header is unchanged. -->
+  <div class="presence" id="pp-presence" title="Viewing now"></div>
 </header>
 
 <div class="overlay" id="overlay">
@@ -6786,6 +6807,68 @@ function renderFares(){
 // Per-tab refresh chip — replaces the static "Report: <date>" widget. Loads-driven tabs
 // show dataRefreshed (updates 6 AM + 11 AM); fare-driven tabs show faresRefreshed (stays 6 AM
 // because the midday run skips fare scraping). Suggestions shows both.
+/* ---- live presence face-pile (PricingRoom) ---------------------------------
+   Connects to /api/room on the SAME origin, so it is already behind Cloudflare
+   Access — identity is stamped server-side from the Access header and never comes
+   from the browser. PRESENCE ONLY: this socket carries no edits. Safety's room also
+   relays live edits between users, which is right there because several people edit
+   driver records; here the only shared write surface is fare approval, and a channel
+   that let one browser push state into another would sit beside a live-fare button.
+
+   Every path fails silent. On a local file:// preview, or before the ROOM binding
+   exists in the Pages project, /api/whoami is unreachable and nothing renders — the
+   header looks exactly as it does today.                                        */
+var ppLive=(function(){
+  var ws=null, me={email:'',name:''}, retry=0;
+  function esc(s){ return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function hue(s){ var h=0; s=String(s||''); for(var i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))%360; return h; }
+  function initials(n){
+    var p=String(n||'?').trim().split(/\s+/);
+    return ((p[0]||'?').charAt(0)+(p.length>1?p[p.length-1].charAt(0):'')).toUpperCase();
+  }
+  function render(users){
+    var box=document.getElementById('pp-presence'); if(!box) return;
+    if(!users||!users.length){ box.innerHTML=''; return; }
+    var shown=users.slice(0,5), more=users.length-shown.length;
+    box.innerHTML=shown.map(function(u){
+      var isMe=me.email&&u.email===me.email, h=hue(u.email||u.name);
+      return '<span class="pchip'+(isMe?' pchip-me':'')+'" title="'
+        +esc(u.name||u.email||'?')+(isMe?' (you)':'')
+        +'" style="background:hsl('+h+',52%,42%);border-color:hsl('+h+',60%,34%)">'
+        +esc(initials(u.name||u.email))+'</span>';
+    }).join('')+(more>0?'<span class="pchip pchip-more">+'+more+'</span>':'');
+  }
+  function connect(){
+    var proto=location.protocol==='https:'?'wss://':'ws://';
+    try{ ws=new WebSocket(proto+location.host+'/api/room?name='+encodeURIComponent(me.name||'')); }
+    catch(e){ return; }
+    ws.onopen=function(){ retry=0; };
+    ws.onmessage=function(ev){
+      var m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+      if(m.t==='presence') render(m.users);
+    };
+    ws.onclose=function(){
+      render([]);                       // never leave a stale roster on screen
+      retry++;
+      if(retry<=8) setTimeout(connect, Math.min(30000, 1500*Math.pow(2,retry)));
+    };
+    ws.onerror=function(){ try{ ws.close(); }catch(e){} };
+  }
+  setInterval(function(){ if(ws&&ws.readyState===1) ws.send('{"t":"ping"}'); },55000);
+  // Only light up where the Functions layer can exist. The protocol guard is not
+  // cosmetic: on a file:// load fetch() logs a console error ("URL scheme file is
+  // not supported") that a .catch() cannot suppress, and verify_dashboard treats any
+  // console error as a broken build — so without this the regression gate blocks
+  // every deploy. (It did. 2026-08-04.)
+  if(location.protocol==='http:'||location.protocol==='https:'){
+    fetch('/api/whoami').then(function(r){ return r.ok?r.json():null; }).then(function(j){
+      if(!j) return; me=j; connect();
+    }).catch(function(){});
+  }
+  return { roster:function(){ return me; } };
+})();
+
 function updateRChipForTab(name){
   const t = window.__refreshedAt || {};
   const data  = t.dataRefreshed  || '—';
