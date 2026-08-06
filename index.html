@@ -5510,10 +5510,27 @@ function buildTripRows(){
     }
     // ONE MODEL: build the row, then let computeV4 (the signal model behind "Lean") set action/target,
     // so the Action column, filters, KPIs, sort, submit AND the hover Lean are all the same model.
-    const gapPct=(fare!==null&&flixFare_!==null&&flixFare_>0)?+((fare-flixFare_)/flixFare_*100).toFixed(1):null;
+    // ── Competitive reference: PABT vs the cheapest NYC Flix stop ──────────────
+    // Our scrape pins the NYC end to Port Authority, but a customer shopping this
+    // route sees every Flix NYC stop, and PABT is the cheapest of them in only 20% of
+    // departure slots (measured 2026-08-04 over 980 matched slots; median gap $3.00,
+    // $8.99-$9.50 on DC). Owen's ruling 2026-08-06: key the competitive read to the
+    // CHEAPER of the two. Both are kept on the row so any suggestion stays auditable —
+    // flixFare is always the PABT number, flixRef is what the model actually priced
+    // against, and flixRefStop names it.
+    const _altHr = (depMins!=null) ? Math.floor(depMins/60) : null;
+    const _alt = altBestFlix(corridor, direction, depDateISO, _altHr);
+    let flixRef_=flixFare_, flixRefStop_='PABT';
+    if(_alt && _alt.f>0 && (flixFare_===null || _alt.f<flixFare_)){
+      flixRef_=_alt.f; flixRefStop_=_altStopShort(_alt.s);
+    }
+    const gapPct=(fare!==null&&flixRef_!==null&&flixRef_>0)?+((fare-flixRef_)/flixRef_*100).toFixed(1):null;
+    const gapPctPabt=(fare!==null&&flixFare_!==null&&flixFare_>0)?+((fare-flixFare_)/flixFare_*100).toFixed(1):null;
     const row={corridor,direction,date:depDateStr,dateISO:depDateISO,dow,daysOut,
                depart,depMins,band,schedule,fare,remaining,
                flixFare:flixFare_,flixSeats:flixSeats_,flixMatchType,priorFare:priorFare_,
+               flixRef:flixRef_,flixRefStop:flixRefStop_,flixAlt:_alt?_alt.f:null,
+               flixAltStop:_alt?_altStopShort(_alt.s):null,gapPctPabt,
                gapPct,paxPerTrip,velocity,revenue:tripRev,realizedFare,action:'Hold',target:fare,reason:''};
     const _v4=computeV4(row);
     row.action=_v4.action; row.target=_v4.target; row.reason=_v4Reason(row,_v4);
@@ -5817,19 +5834,24 @@ function _v4Confidence(r){
   if(r.daysOut!==null&&r.daysOut<=1)c-=0.2;
   return Math.max(0,Math.min(1,c));
 }
+// The fare the model actually prices against: the cheaper of PABT and the cheapest
+// direct Flix departure from any NYC stop in the same hour (Owen 2026-08-06).
+// Falls back to PABT when there is no alt-stop data for that slot.
+function _v4Flix(r){ return (r.flixRef!=null?r.flixRef:r.flixFare); }
 function computeV4(r){
   const L=_v4LoadScore(r), G=_v4GapScore(r), P=_v4PaceScore(r), F=_v4FlixSeatsScore(r);
   let score,action='Hold',target=r.fare,scoreSource;
-  if(r.flixFare!==null){
+  const FX=_v4Flix(r);
+  if(FX!==null){
     score=0.25*L+0.25*G+0.25*P+0.25*F;
     scoreSource='full';
     // Balanced tune 2026-05-29 — thresholds centralized in the V4_* config block (2026-07-07)
     if(score>V4_RAISE_SCORE||_v4LoadFor(r)>V4_RAISE_LOAD){   // raise on a real signal OR a near-full bus
       action='Raise';
-      target=priceTarget(r.fare+0.5*Math.max(0,r.flixFare-r.fare));
+      target=priceTarget(r.fare+0.5*Math.max(0,FX-r.fare));
       if(target<=r.fare)target=priceTarget(r.fare+1);
     } else if(score<V4_LOWER_SCORE&&r.gapPct>V4_LOWER_GAP_PCT&&_v4LoadFor(r)<V4_LOWER_LOAD){   // lower only when clearly over Flix AND fairly empty
-      action='Lower';target=priceTarget(r.flixFare*0.97);
+      action='Lower';target=priceTarget(FX*0.97);
     }
   } else {
     score=0.5*L+0.5*P;
@@ -5861,7 +5883,7 @@ function computeV4(r){
     if(raiseCapped) reason+=' (capped at +50% of current)';
   } else if(action==='Lower'){
     reason='+'+Math.round(r.gapPct)+'% over FlixBus, only '+_lp+'% full, demand soft → lower to '+fMoney(target)+'.';
-  } else if(r.flixFare===null){
+  } else if(FX===null){
     reason='No FlixBus match to compare — hold at '+fMoney(r.fare)+'.';
   } else if(score<V4_LOWER_SCORE){
     const why=[];
@@ -5871,6 +5893,11 @@ function computeV4(r){
   } else {
     reason='Signals mixed (score '+(score>=0?'+':'')+score.toFixed(2)+') — hold at '+fMoney(r.fare)+'.';
   }
+  // AUDITABILITY: when the decision was priced against a non-PABT stop, say so in the
+  // reason itself — this string is what lands in change_log.jsonl, so a future reader can
+  // tell which competitor fare drove the call without re-deriving it.
+  if(r.flixRefStop&&r.flixRefStop!=='PABT'&&FX!==null&&action!=='Hold')
+    reason+=' [vs Flix '+fMoney(FX)+' at '+r.flixRefStop+', not PABT '+fMoney(r.flixFare)+']';
   const conf=_v4Confidence(r);
   const confLabel=conf>=0.6?'High':conf>=0.35?'Med':'Low';
   // Conf weighted contribution breakdown for the tooltip
@@ -5926,9 +5953,29 @@ function showSugBreakdownTip(ev,key){
     occ+=row('Peak on board', so?'SOLD OUT':(ops.max+'/'+ops.seats+' ('+pk+'%)'), so?'var(--bad)':pk>=80?'var(--warn)':'var(--good)');
   }
   // ── Competitor ──
-  const comp=row('Competitor', r.flixFare!=null
-    ?('Flix <b>'+fMoney(r.flixFare)+'</b>'+(r.flixSeats!=null?' ('+r.flixSeats+' seats left)':'')+' · gap <span style="color:'+(r.gapPct>15?'var(--bad)':r.gapPct<-10?'var(--good)':'var(--warn)')+';font-weight:600">'+(r.gapPct>=0?'+':'')+r.gapPct.toFixed(1)+'%</span>'+(r.flixMatchType==='band'?' <span style="color:var(--text3);font-size:10px">~band</span>':''))
-    :'<i style="color:var(--text3)">no match</i>');
+  // Show the PABT fare with the PABT gap, and the cheapest-NYC-stop fare with ITS gap.
+  // ⚠️ Pairing r.flixFare (PABT) with r.gapPct (now computed against the cheaper stop)
+  // printed "Flix $64 · gap +4.7%" — a price and a percentage that do not belong to each
+  // other. Each line now carries its own matching pair, and the reference is named.
+  const _gapCol=g=>g>15?'var(--bad)':g<-10?'var(--good)':'var(--warn)';
+  const _gapTxt=g=>g==null?'&mdash;':'<span style="color:'+_gapCol(g)+';font-weight:600">'
+      +(g>=0?'+':'')+g.toFixed(1)+'%</span>';
+  const comp=(r.flixFare!=null
+      ? row('Competitor · PABT','Flix <b>'+fMoney(r.flixFare)+'</b>'
+          +(r.flixSeats!=null?' ('+r.flixSeats+' seats left)':'')
+          +' &middot; gap '+_gapTxt(r.gapPctPabt)
+          +(r.flixMatchType==='band'?' <span style="color:var(--text3);font-size:10px">~band</span>':''))
+      : row('Competitor · PABT','<i style="color:var(--text3)">no match</i>'))
+    + ((r.flixAlt!=null&&r.flixAltStop)
+      ? row('Cheapest NYC stop','<b>'+fMoney(r.flixAlt)+'</b> <span style="color:var(--warn)">'
+          +r.flixAltStop+'</span> &middot; gap '+_gapTxt(
+            (r.fare!=null&&r.flixAlt>0)?+((r.fare-r.flixAlt)/r.flixAlt*100).toFixed(1):null))
+      : '')
+    + (r.flixRef!=null
+      ? row('Priced against', r.flixRefStop==='PABT'
+          ? 'PABT &mdash; the cheaper of the two'
+          : '<strong style="color:var(--warn)">'+r.flixRefStop+'</strong> &mdash; cheaper than PABT')
+      : '');
   // ── Pace: single trajectory signal (replaces the old velocity "Momentum" line) ──
   const pace=pacingFor(sched,iso);
   let paceRow='';
@@ -6545,7 +6592,24 @@ function renderSuggestionsTable(rows){
         +(r.flixSeats!==null?' <span style="color:'+seatColor(r.flixSeats)+';font-size:10px">('+r.flixSeats+' seats left)</span>':'')
         +' → gap <span style="color:'+gc+';font-weight:600">'+gs+'</span>'
         +(r.flixMatchType==='band'?' <span style="color:var(--text3);font-size:9px" data-tip="No Flix trip within ±1hr — same time-band avg used" aria-label="No Flix trip within ±1hr — same time-band avg used">~band</span>':'')
-        +'</div>';
+        +'</div>'
+        // Both comparisons, always — the PABT line above is what our scrape captures, this
+        // is the cheapest DIRECT Flix departure from ANY NYC stop in the same hour, which is
+        // what a customer actually sees. The model prices against whichever is cheaper
+        // (Owen 2026-08-06), so the row states which one it used rather than implying PABT.
+        +((r.flixAlt!=null&&r.flixAltStop)
+          ? '<div style="font-size:11px;line-height:1.5"><span style="color:var(--text3)">Cheapest NYC stop:</span> '
+            +'<span style="color:var(--text2)">'+fMoney(r.flixAlt)+'</span> '
+            +'<span style="color:var(--warn);font-size:10px">'+r.flixAltStop+'</span>'
+            +(r.gapPctPabt!=null&&r.gapPct!=null&&Math.abs(r.gapPct-r.gapPctPabt)>=0.1
+              ? ' <span style="color:var(--text3);font-size:10px">(gap vs PABT '
+                +(r.gapPctPabt>=0?'+':'')+r.gapPctPabt.toFixed(1)+'%)</span>' : '')
+            +'</div>'
+            +'<div style="font-size:10px;color:var(--text3);line-height:1.4">Priced against '
+            +(r.flixRefStop==='PABT'?'PABT — it is the cheaper of the two'
+              :'<strong style="color:var(--warn)">'+r.flixRefStop+'</strong> — cheaper than PABT')
+            +'</div>'
+          : '');
     } else {
       compLine='<div style="font-size:11px;line-height:1.5;color:var(--text3)">Comp: no Flix match</div>';
     }
