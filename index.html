@@ -1249,6 +1249,17 @@ body{
       <span class="fsep"></span>
       <span class="chip active" onclick="setFA('Actionable',this)">Actionable</span>
       <span class="chip" onclick="setFA('All',this)">All Actions</span>
+      <span class="fsep"></span>
+      <span style="color:var(--text3);font-size:11px;align-self:center;margin-right:2px">Departing:</span>
+      <!-- Own wrapper + own sync — _syncChips() only searches inside `.filters`, and a
+           chip added to a row it does not cover silently never highlights (the 8/04 bug). -->
+      <span id="sugDaysChips" style="display:contents">
+        <span class="chip active" data-mind="0" data-tip="No departure-date floor — every trip in the current filters." aria-label="No departure-date floor." onclick="setSugMinDays(0,this)">Any date</span>
+        <span class="chip" data-mind="1" data-tip="Exclude trips departing today." aria-label="Exclude trips departing today." onclick="setSugMinDays(1,this)">Skip today</span>
+        <span class="chip" data-mind="2" data-tip="Exclude today and tomorrow — leaves the near-in departures alone." aria-label="Exclude today and tomorrow." onclick="setSugMinDays(2,this)">Skip today + tmrw</span>
+        <span class="chip" data-mind="4" data-tip="Only trips departing 4 or more days out." aria-label="Only trips departing 4 or more days out." onclick="setSugMinDays(4,this)">4+ days</span>
+        <span class="chip" data-mind="8" data-tip="Only trips departing 8 or more days out." aria-label="Only trips departing 8 or more days out." onclick="setSugMinDays(8,this)">8+ days</span>
+      </span>
       <span class="chip" style="color:var(--good)" onclick="setFA('Raise',this)">↑ Raise</span>
       <!-- Match retired 2026-05-29 (v4 has no Match action): <span class="chip" style="color:#f97316" onclick="setFA('Match',this)">≈ Match</span> -->
       <span class="chip" style="color:var(--bad)"  onclick="setFA('Lower',this)">↓ Lower</span>
@@ -4976,6 +4987,20 @@ function renderRPM(){
 
 // ── FARES TAB ────────────────────────────────────────────────────────────────
 let ppbFares=[],flixFares=[],priorPpbMap={},fcFilter='Boston',fdFilter='All',faFilter='Actionable';
+// Departure-date floor for Price Suggestions. Colm 2026-08-06: "I may want to action
+// everything except today and tomorrow, but I don't have a mechanism to do that other
+// than manually selecting or deselecting." Expressed as a MINIMUM days-out rather than a
+// date range — the near-in days are the ones an operator wants to hold back, and a floor
+// says that directly without needing two date pickers.
+// var (not let): read during the initial render, per the TDZ rule.
+var sugMinDays=0;
+function setSugMinDays(v,btn){
+  sugMinDays=+v;
+  document.querySelectorAll('#sugDaysChips [data-mind]').forEach(function(c){
+    c.classList.toggle('active', +c.getAttribute('data-mind')===sugMinDays);
+  });
+  renderFares();
+}
 // ── FlixBus NYC stop scope ──────────────────────────────────────────────────
 // Our fare scrape pins the NYC end to Port Authority, but a customer shopping
 // NYC↔anywhere sees EVERY Flix NYC stop. MEASURED 2026-08-04 on 980 matched
@@ -6188,6 +6213,7 @@ async function renderChangeHistory(force){
     seen.add(k);
     changes.push({ts:e.ts||'',month:(e.ts||'').slice(0,7),src:srcOf(e),
                   corridor:e.corridor,direction:e.direction,date:e.date,
+                  dow:e.dow,buyStart:e.buy_start,buyEnd:e.buy_end,
                   schedule:e.schedule,fare:e.fare,target:e.target,action:e.action});
   });
   if(!changes.length){
@@ -6215,11 +6241,33 @@ async function renderChangeHistory(force){
       +'<td style="padding:4px 10px;text-align:right;color:var(--text3)">'+(b.untracked||'·')+'</td>'
       +'<td style="padding:4px 0 4px 10px;text-align:right;color:var(--cream);font-weight:600">'+tot+'</td></tr>';
   }).join('');
-  const recent=changes.slice().sort((a,b)=>b.ts.localeCompare(a.ts)).slice(0,6).map(c=>
-    '<div class="od-row" style="padding:3px 0"><span class="od-seg">'
-    +'<span style="color:var(--text3);font-family:\'JetBrains Mono\',monospace;font-size:10px">'+c.ts.slice(0,16).replace('T',' ')+'</span> '
-    +badge(c.src)+' '+(c.corridor||'')+' '+(c.direction||'')+' '+(c.date||'')+' sched '+(c.schedule||'')
-    +'</span><span class="od-cnt" style="font-family:\'JetBrains Mono\',monospace">$'+c.fare+' &rarr; <b>$'+c.target+'</b></span></div>').join('');
+  // Row format per Colm 2026-08-06: weekday beside the date, no "sched" filler, and the
+  // window the change is actually EFFECTIVE for.
+  // buy_start/buy_end only exist on entries written from 2026-08-06 on. Older rows say
+  // "not recorded" rather than inferring one: the default WAS departure+1, but an
+  // operator could have narrowed it via auto-expire, and we cannot tell after the fact.
+  // Showing a guessed window on an audit surface would be worse than showing none.
+  const _effFmt=d=>{const x=new Date(d+'T00:00:00');return isNaN(x.getTime())?d:
+      String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')+'-'+x.getFullYear();};
+  const _effTxt=c=>{
+    if(!c.buyEnd) return '<span style="color:var(--text3);font-size:9.5px">effective window not recorded</span>';
+    const expired=c.buyEnd<_expTodayISO();   // local date, not toISOString (UTC rolls early)
+    return '<span style="font-size:9.5px;color:'+(expired?'var(--text3)':'var(--warn)')+'">effective '
+      +_effFmt(c.buyStart||c.ts.slice(0,10))+' to '+_effFmt(c.buyEnd)+(expired?' &middot; expired':'')+'</span>';
+  };
+  const _recentRows=changes.slice().sort((a,b)=>b.ts.localeCompare(a.ts)).slice(0,100);
+  const recent='<div style="max-height:340px;overflow-y:auto;padding-right:6px">'
+    +_recentRows.map(c=>
+      '<div class="od-row" style="padding:4px 0;align-items:flex-start"><span class="od-seg">'
+      +'<span style="color:var(--text3);font-family:monospace;font-size:10px">'+c.ts.slice(0,16).replace('T',' ')+'</span> '
+      +badge(c.src)+' '+(c.corridor||'')+' '+(c.direction||'')+' '
+      +(c.dow?'<b>'+c.dow+'</b> ':'')+(c.date||'')+' '
+      +'<span style="font-family:monospace">'+(c.schedule||'')+'</span>'
+      +'<br>'+_effTxt(c)
+      +'</span><span class="od-cnt" style="font-family:monospace">$'+c.fare+' &rarr; <b>$'+c.target+'</b></span></div>').join('')
+    +'</div>'
+    +'<div style="font-size:9.5px;color:var(--text3);margin-top:5px">Showing the most recent '
+    +_recentRows.length+' of '+changes.length+' applied changes.</div>';
   el.innerHTML=
     '<div class="mini-kpis" style="margin-bottom:12px">'
       +mkpi('Applied changes',changes.length,'','all time in log')
@@ -6908,7 +6956,11 @@ function renderFares(){
     if(faFilter==='Actionable')return r.action==='Raise'||r.action==='Match'||r.action==='Lower';
     return r.action===faFilter;
   };
-  renderSuggestionsTable(tripRows.filter(r=>cdFilter(r)&&actionFilter(r)));
+  // Departure floor. Applied HERE (not at render) so the KPI counts, the priority sort
+  // and "Select all actionable" all see the same set — select-all works off the rendered
+  // checkboxes, so filtering here is what makes it safe to click.
+  const daysFilter=r=>sugMinDays<=0||(r.daysOut!=null&&r.daysOut>=sugMinDays);
+  renderSuggestionsTable(tripRows.filter(r=>cdFilter(r)&&actionFilter(r)&&daysFilter(r)));
 }
 
 
