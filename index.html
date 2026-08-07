@@ -4357,17 +4357,26 @@ function momPace(r){
 var MOM_SELLOUT_MIN_LOAD=40;
 // A "Soft" call is the expensive one to get wrong — dropping the fare or cancelling a
 // trip that was going to fill costs real revenue, whereas a wrong "Raise" costs a
-// little margin. Backtested out-of-sample (baseline trained on May–June departures,
-// scored against held-out July, truth = peak occupancy / committed seats):
-//   route had typically sold <=10% by judging time -> 33% of soft calls finished >=80%
-//     full and 14% SOLD OUT — worse than the 28% base rate, i.e. actively misleading
-//   >=15% sold by then -> false positives fall to ~10% and sold-outs to ~4%
-// So a soft call is only allowed once enough of the booking is actually knowable.
-// This is route-aware by construction: it suppresses early calls on back-loaded routes
-// (group 6200 ran 53% false positives at 14 days out) while still allowing them on
-// front-loaded ones. Rows below the gate keep their pace number but are labelled as
-// informational, not actionable.
-var MOM_SOFT_MIN_SHARE=15;
+// little margin, so a soft call is only allowed once enough of the booking is knowable.
+// RE-FITTED 2026-08-07. The old 15 was tuned 2026-07-30 against route-group x early/rest
+// curves with a single blended per-schedule level; corridor x direction x 4h cells and
+// per-weekday levels have since replaced BOTH, so that threshold no longer described the
+// baseline it gates. Re-fit: curves + levels rebuilt on TRAIN departures 06-09..07-20
+// ONLY, scored on held-out 07-21..08-06 (4,899 observations). Truth = peak occupancy /
+// committed seats, NOT tickets/seats (turnover puts 80 tickets through a 54-seat bus).
+// A false positive = a soft call on a trip that finished >=80% full.
+//   14d out (base 36.0% finish full):  ungated 25.9% FP | 12.5 -> 19.5% | 15 -> 22.1%
+//                                      | 17.5 -> 11.4%   <- 15 was not even a knee point
+//    7d out (base 24.8%):              ungated 15.4% | 15 -> 14.1% (90% kept)
+//                                      | 17.5 -> 12.5% (84%) | 20 -> 12.2% (71%)
+//    3d out (base 21.6%):              8.0% FP at every gate <=17.5 — INERT, and correctly
+//                                      so: by 3 days out nearly every cohort has sold 17.5%
+// 17.5 has the lowest false-positive rate at both ranges where the gate does anything. It
+// costs 14-day coverage (16% of soft calls kept, was 46%) — deliberate, because those are
+// the least trustworthy calls and a suppressed row still shows its pace as informational.
+// Route-aware by construction: suppresses early calls on back-loaded routes while still
+// allowing them on front-loaded ones.
+var MOM_SOFT_MIN_SHARE=17.5;
 function _momSignal(m){
   if(!m||m.tooEarly) return {t:'Too early',c:'var(--text3)'};
   if(m.projLoad!=null&&m.projLoad>=100&&(m.loadNow||0)>=MOM_SELLOUT_MIN_LOAD)
@@ -4598,13 +4607,15 @@ function renderMomentumPace(){
       +'where a one-ticket swing would distort the percentage. &ldquo;Load Now&rdquo; is the '
       +'grounding number: pace says how a trip compares to its route, load says how full it '
       +'actually is.'
-      +'<br><strong>How much to trust a &ldquo;Soft&rdquo; call:</strong> backtested on held-out '
-      +'July departures (baseline trained on May&ndash;June only), about <strong>10% of soft '
-      +'calls still finished 80%+ full and ~4% sold out</strong> &mdash; so treat it as a prompt '
-      +'to look, not an instruction to cut. Calls are suppressed entirely as '
-      +'&ldquo;Behind (early)&rdquo; until the route has typically sold '+MOM_SOFT_MIN_SHARE
-      +'% of its final by that point; below that the flag was measured to be <em>worse</em> '
-      +'than the base rate. A &ldquo;Raise&rdquo; call is the safer direction to be wrong on.'
+      +'<br><strong>How much to trust a &ldquo;Soft&rdquo; call:</strong> re-fitted 2026-08-07 on '
+      +'held-out departures (Jul 21 &ndash; Aug 6, with the curves and levels trained on '
+      +'Jun 9 &ndash; Jul 20 only), about <strong>12% of soft calls still finished 80%+ full and '
+      +'~5% sold out</strong> &mdash; so treat it as a prompt to look, not an instruction to cut. '
+      +'Calls are suppressed entirely as &ldquo;Behind (early)&rdquo; until the route has typically '
+      +'sold '+MOM_SOFT_MIN_SHARE+'% of its final by that point; below that the flag carries no '
+      +'reliable edge &mdash; at 7 days out those suppressed calls finished full <em>30%</em> of the '
+      +'time against a 25% base rate, i.e. actively misleading. '
+      +'A &ldquo;Raise&rdquo; call is the safer direction to be wrong on.'
       +'<br><strong>Limits:</strong> the baseline covers '+(b.span||[]).join(' to ')+' only, so '
       +'strongly seasonal routes (Cape / Woods Hole in particular) are judged against '
       +'off-peak months and will read as running far ahead. Projections above '
