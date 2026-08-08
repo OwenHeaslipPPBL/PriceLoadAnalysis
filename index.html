@@ -224,6 +224,13 @@ table.pivot tbody tr:hover td.s2{background:var(--surface2);}
 table.pivot th.s3,table.pivot td.s3{position:sticky;left:236px;z-index:10;background:var(--surface2);border-right:2px solid var(--border2);}
 table.pivot td.s3{background:var(--surface);}
 table.pivot tbody tr:hover td.s3{background:var(--surface2);}
+/* Frozen header cells must out-stack the SCROLLING date headers, which are
+   sticky-top at z-index:15. The z-index:25 declared for th.s1/s2/s3 further up is
+   silently overridden by the z-index:10 in the three sticky rules directly above
+   (same specificity, later wins) — so a date header scrolling underneath painted
+   OVER "Route"/"Time". Latent on desktop, where the pivot never scrolls sideways;
+   visible on a phone the moment you scroll. Must stay AFTER those rules. */
+table.pivot thead th.s1,table.pivot thead th.s2,table.pivot thead th.s3{z-index:26;}
 
 /* date column header */
 .date-th{text-align:center;}
@@ -431,11 +438,28 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
   .filters{gap:5px;}
   .chip{padding:5px 10px;font-size:11px;}
   .search-inp{width:100%;}
-  /* pivot: keep ONLY the route column sticky — on a 390px screen the three
-     frozen columns (160+76+72px) left no room for data. Time + Sched scroll. */
-  table.pivot th.s1,table.pivot td.s1{min-width:120px !important;max-width:130px;}
-  table.pivot th.s2,table.pivot td.s2,table.pivot th.s3,table.pivot td.s3{position:static;}
-  .route-text{font-size:10px;}
+  /* pivot: freeze Route + Time on phones (Owen 2026-08-08) — Time is what you
+     orient by while scrolling day columns; the schedule number is not, so Sched #
+     scrolls away with the data.
+     ⚠️ Both frozen columns are pinned to EXACT widths on the cell AND its inner
+     div: .route-text/.time-text carry their own fixed width (160/76px) which
+     otherwise forces the cell wider than any min/max-width on the td — that is
+     why the old max-width:130px rule rendered a 130px cell around a 160px div.
+     s2's sticky `left` must equal s1's RENDERED width or the two frozen columns
+     overlap, so these numbers move together: s1 104px -> s2 left:104px.
+     ⚠️ min-width MUST carry !important: the <th> cells set min-width inline
+     (160/76/72px) and an inline style outranks any plain selector — that is the
+     only reason the original s1 rule had !important, and s2 silently rendered at
+     76px until it got the same treatment.
+     Time is 64px, not less: "12:45 PM" is 8 mono chars and clips below ~60px. */
+  table.pivot th.s1,table.pivot td.s1{width:104px;min-width:104px !important;max-width:104px;}
+  .route-text{font-size:10px;width:104px;padding:0 8px;gap:4px;}
+  table.pivot th.s2,table.pivot td.s2{position:sticky;left:104px;
+    width:64px;min-width:64px !important;max-width:64px;border-right:2px solid var(--border2);}
+  .time-text{font-size:10px;width:64px;padding:0 6px;}
+  /* Sched # scrolls; drop its divider so the frozen block has exactly one
+     terminating edge (at Time) rather than a stray rule out in the scroll area. */
+  table.pivot th.s3,table.pivot td.s3{position:static;border-right:none;}
   .pivot-wrap,.mom-wrap,#fareTableWrap{max-height:calc(100vh - 200px);-webkit-overflow-scrolling:touch;}
   /* suggestions table: restore horizontal scroll (desktop trades it for
      viewport-sticky headers, which don't matter on a phone) */
