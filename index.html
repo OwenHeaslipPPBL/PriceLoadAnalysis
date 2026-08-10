@@ -3076,6 +3076,25 @@ function trueCap(tix, sched, dateISO, fallback){
 }
 // Date -> YYYY-MM-DD (local-safe) for trueCap lookups.
 function capISO(d){ return d && d.toISOString ? d.toISOString().slice(0,10) : (d||''); }
+// Cancel-candidate ordering — ONE comparator, shared by the Overview list AND the
+// Watchlist list. They had silently drifted apart: Overview sorted date -> tix, while
+// Watchlist sorted date -> nothing, so its within-day order was just 2501 CSV row
+// order. Two lists of the same thing in two different orders.
+// Don Soja 2026-08-10, asked directly: "It doesn't really matter to me besides the date
+// order that it is in... but if you were to make the change, alphabetical by date is
+// best." So DATE stays primary (the part he actually relies on) and the within-day
+// tiebreak is ALPHABETICAL — origin then destination, the pairing the route cell shows.
+// Dropped the old tix tiebreak: the filter is tix<4, so it could only ever take four
+// values, and it was scrambling the visible departure times to discriminate almost
+// nothing. Tix remains its own column.
+// Time is the LAST key purely for determinism — without it, two same-day same-route
+// trips fall back to source order and the list can reshuffle between runs.
+function _cancelOrder(a,b){
+  return ((a.depDate?a.depDate.getTime():0)-(b.depDate?b.depDate.getTime():0))
+      || String(a.org||'').localeCompare(String(b.org||''))
+      || String(a.dst||'').localeCompare(String(b.dst||''))
+      || (_momMin(a.time)-_momMin(b.time));
+}
 
 function pivCls(tix,cap,doubled,busCount){if(!tix)return'fc-none';if(doubled){const bc=busCount||2;return bc>=4?'fc-quad':bc===3?'fc-tpl':'fc-dbl';}if(tix>=cap)return'fc-sold';if(tix>=35)return'fc-hi';return'fc-none';}
 
@@ -3293,7 +3312,7 @@ function renderOverview(){
     if(!r.depDate||isSubsidized(r))return false;
     const d=Math.ceil((r.depDate-today)/864e5);
     return d>=0&&d<=2&&r.tix<4;
-  }).sort((a,b)=>(a.depDate?a.depDate.getTime():0)-(b.depDate?b.depDate.getTime():0)||a.tix-b.tix);
+  }).sort(_cancelOrder);
   const schedCounts={};
   cancelList.forEach(r=>{const k=String(r.sched).trim();schedCounts[k]=(schedCounts[k]||0)+1;});
   const CANCEL_CAP=10;
@@ -4883,7 +4902,7 @@ function renderWatchlist(){
     if(!r.depDate||isSubsidized(r))return false;
     const dOut=Math.ceil((r.depDate-today)/864e5);
     return dOut>=0&&dOut<=wdays&&r.tix<cancelT;
-  }).sort((a,b)=>(a.depDate?.getTime()||0)-(b.depDate?.getTime()||0));
+  }).sort(_cancelOrder);   // same comparator as the Overview list — see _cancelOrder
 
   const addList=snapData.filter(r=>r.tix>=addT).sort((a,b)=>{
     const da=(a.depDate?a.depDate.getTime():0),db=(b.depDate?b.depDate.getTime():0);
