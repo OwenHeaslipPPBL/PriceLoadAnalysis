@@ -52,9 +52,11 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
   cursor:default;user-select:none;
 }
 .pchip:first-child{margin-left:0;}
-.pchip-me{box-shadow:0 0 0 2px var(--green);}
-.pchip-more{background:var(--text3);border-color:var(--text3);}
-@media (max-width:640px){ .pchip{width:23px;height:23px;font-size:9px;} }
+/* Aligned to Safety verbatim 2026-08-11 (Owen: same setup, not a reimplementation).
+   Was --green / a solid --text3 overflow chip / 23px mobile. */
+.pchip-me{box-shadow:0 0 0 2px var(--green2);}
+.pchip-more{background:var(--surface2);border-color:var(--border);color:var(--text3);font-size:9px;}
+@media (max-width:640px){ .pchip{width:22px;height:22px;font-size:9px;} }
 .report-chip{background:rgba(6,136,60,0.12);border:1px solid rgba(6,136,60,0.35);color:var(--green2);padding:5px 13px;border-radius:20px;font-size:12px;font-family:'JetBrains Mono',monospace;font-weight:500;}
 
 .export-btn{background:var(--green);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-family:'Exo 2',sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;display:none;align-items:center;gap:7px;transition:all .18s;white-space:nowrap;}
@@ -846,7 +848,7 @@ body{
   </div>
   <!-- Live presence face-pile. Stays empty unless /api/room is reachable, so on a
        local file:// preview or before the ROOM binding exists the header is unchanged. -->
-  <div class="presence" id="pp-presence" title="Viewing now"></div>
+  <div class="presence" id="pp-presence" aria-label="Viewing now"></div>
 </header>
 
 <div class="overlay" id="overlay">
@@ -7188,15 +7190,32 @@ var ppLive=(function(){
     var p=String(n||'?').trim().split(/\s+/);
     return ((p[0]||'?').charAt(0)+(p.length>1?p[p.length-1].charAt(0):'')).toUpperCase();
   }
+  // Display name. whoami.js can only derive one from the email local-part
+  // ("clynch" -> "Clynch"), which yields a SINGLE initial and reads as wrong to the
+  // person looking at it — exactly what Colm's 2026-08-06 screenshot showed (A·L·D·C).
+  // Cloudflare Access exposes the real Entra identity, so prefer that. Verbatim from
+  // Safety's cleanName so both dashboards resolve the same person the same way.
+  function cleanName(n){
+    n=String(n||'').trim();
+    if(n.indexOf(',')>-1){                       // "Heaslip, Owen" -> "Owen Heaslip"
+      var parts=n.split(',');
+      n=parts.slice(1).join(' ').trim()+' '+parts[0].trim();
+    }
+    return n.replace(/\s+/g,' ').trim();
+  }
   function render(users){
     var box=document.getElementById('pp-presence'); if(!box) return;
     if(!users||!users.length){ box.innerHTML=''; return; }
     var shown=users.slice(0,5), more=users.length-shown.length;
     box.innerHTML=shown.map(function(u){
       var isMe=me.email&&u.email===me.email, h=hue(u.email||u.name);
-      return '<span class="pchip'+(isMe?' pchip-me':'')+'" title="'
+      // data-tip, NEVER title= — native tooltips are banned platform-wide.
+      // Colour formula is Safety's verbatim (was 52%,42% / 60%,34% here), so one
+      // person's chip is the SAME colour on every dashboard. That is the point of
+      // deriving the hue from the email rather than from position in the roster.
+      return '<span class="pchip'+(isMe?' pchip-me':'')+'" data-tip="'
         +esc(u.name||u.email||'?')+(isMe?' (you)':'')
-        +'" style="background:hsl('+h+',52%,42%);border-color:hsl('+h+',60%,34%)">'
+        +'" style="background:hsl('+h+',45%,26%);border-color:hsl('+h+',60%,45%)">'
         +esc(initials(u.name||u.email))+'</span>';
     }).join('')+(more>0?'<span class="pchip pchip-more">+'+more+'</span>':'');
   }
@@ -7208,6 +7227,12 @@ var ppLive=(function(){
     ws.onmessage=function(ev){
       var m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
       if(m.t==='presence') render(m.users);
+      // else if(m.t==='edit') — DELIBERATELY ABSENT HERE. Safety relays live edits on
+      // this same socket, which is right for a product where several people edit driver
+      // records. Pricing's only shared write surface is fare approval, which writes LIVE
+      // fares to MMC, so a channel letting one browser push state into another would sit
+      // directly beside a live-fare button. The message-type switch is kept in this shape
+      // so relay can be added as a deliberate decision, not incrementally. (2026-08-04.)
     };
     ws.onclose=function(){
       render([]);                       // never leave a stale roster on screen
@@ -7223,8 +7248,23 @@ var ppLive=(function(){
   // console error as a broken build — so without this the regression gate blocks
   // every deploy. (It did. 2026-08-04.)
   if(location.protocol==='http:'||location.protocol==='https:'){
-    fetch('/api/whoami').then(function(r){ return r.ok?r.json():null; }).then(function(j){
-      if(!j) return; me=j; connect();
+    // Ask BOTH and prefer Access's real Entra identity; whoami still supplies the
+    // authoritative EMAIL (which keys "me" and the avatar colour) and is the gate —
+    // no whoami, no socket. Every leg has its own .catch so a failure on either side
+    // degrades to "render nothing", never to a console error or a half-connected room.
+    Promise.all([
+      fetch('/api/whoami').then(function(r){ return r.ok?r.json():null; })
+        .catch(function(){ return null; }),
+      fetch('/cdn-cgi/access/get-identity',{cache:'no-store'})
+        .then(function(r){ return r.ok?r.json():null; })
+        .catch(function(){ return null; })
+    ]).then(function(res){
+      var j=res[0], id=res[1];
+      if(!j) return;
+      me=j;
+      var real=id&&(id.name||id.given_name);
+      if(real) me.name=cleanName(real)||me.name;
+      connect();
     }).catch(function(){});
   }
   return { roster:function(){ return me; } };
