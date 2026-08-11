@@ -5575,6 +5575,27 @@ function raiseCeiling(fare){
   if(cap > capRaw) cap -= 5;       // priceTarget rounded UP past the ceiling -> step down one $5 bucket
   return cap < fare ? fare : cap;  // safety: never below the current fare
 }
+// Owen 2026-08-11. Raises were ceilinged at +50% since 2026-06-16 but LOWERS had no
+// floor at all — the model was deliberately restrained upward and unbounded downward,
+// on the side where a wrong call costs real revenue. With the cheapest-NYC-Flix
+// reference (2026-08-06) the book carried 717 Lower rows at a MEDIAN 30% cut, p90 50%,
+// max 67%, so one select-all was a very large amount of discounting.
+// 0.3333 is not arbitrary: a +50% raise multiplies the fare by 1.5, so the exact
+// inverse is dividing by 1.5 — a 33.3% cut. The model is now equally restrained in
+// both directions, which is the whole point of having a guardrail at all.
+// Measured on the live book before choosing: 20% would clip 98% of Lower rows, 25% 79%,
+// 30% 54%, 33.3% 48%, 40% 29%, 50% only 6% (a guardrail that never fires).
+// To retune, change this ONE number.
+const MAX_LOWER_PCT = 0.3333;
+// Smallest priceTarget-rounded fare that does not fall below fare*(1-MAX_LOWER_PCT).
+// Mirrors raiseCeiling exactly, including the bucket step and the safety clamp.
+function lowerFloor(fare){
+  if(!fare) return 0;
+  const floorRaw = fare*(1-MAX_LOWER_PCT);
+  let f = priceTarget(floorRaw);
+  if(f < floorRaw) f += 5;         // priceTarget rounded DOWN past the floor -> step up one $5 bucket
+  return f > fare ? fare : f;      // safety: never ABOVE the current fare
+}
 
 // Suggestion decision logic — single source of truth so it can be re-run off a
 // live fare. Returns {action,target,reason,gapPct} from (fare, flixFare, load, vel, daysOut).
@@ -6105,6 +6126,12 @@ function computeV4(r){
     const cap=raiseCeiling(r.fare);
     if(target>cap){target=cap;raiseCapped=true;}
   }
+  // Symmetric floor on cuts (Owen 2026-08-11) — see MAX_LOWER_PCT.
+  let lowerCapped=false;
+  if(action==='Lower'){
+    const floor=lowerFloor(r.fare);
+    if(target<floor){target=floor;lowerCapped=true;}
+  }
   // Plain-language reason for the chosen action (drives the Action-cell tooltip + the approval log).
   const _lp=Math.round(_v4LoadFor(r)*100);
   let reason;
@@ -6122,6 +6149,10 @@ function computeV4(r){
     if(raiseCapped) reason+=' (capped at +50% of current)';
   } else if(action==='Lower'){
     reason='+'+Math.round(r.gapPct)+'% over FlixBus, only '+_lp+'% full, demand soft → lower to '+fMoney(target)+'.';
+    // Mirrors the raise note. This string lands in change_log.jsonl, so a cut that was
+    // held back by the floor must SAY so — otherwise the audit trail shows a target
+    // with no indication the model actually wanted to go lower.
+    if(lowerCapped) reason+=' (floored at -33% of current)';
   } else if(FX===null){
     reason='No FlixBus match to compare — hold at '+fMoney(r.fare)+'.';
   } else if(score<V4_LOWER_SCORE){
