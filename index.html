@@ -843,7 +843,7 @@ body{
 
 <header class="header">
   <div class="hdr-left">
-    <a class="pp-home" href="https://ppb-landing.pages.dev" title="Back to all dashboards"><span class="pp-home-arrow">&larr;</span><span class="pp-home-label">Dashboards</span></a>
+    <a class="pp-home" href="https://ppb-landing.pages.dev" data-tip="Back to all dashboards" aria-label="Back to all dashboards"><span class="pp-home-arrow">&larr;</span><span class="pp-home-label">Dashboards</span></a>
     <div class="ghost-line">Pricing</div>
   </div>
   <!-- Live presence face-pile. Stays empty unless /api/room is reachable, so on a
@@ -8160,7 +8160,7 @@ function renderFuWeekly(){
     ? ` data-tip="Near-zero service: ${f.rep} buses reported but averaged only ${Math.round(f.per)} mi (normal is a full day's running). The fleet genuinely did not run — service suspension, e.g. a blizzard or holiday. This number is real; exclude it from typical-week planning." aria-label="Service suspended — near-zero running"`
     : ` data-tip="Only ${f.rep} buses reported mileage, but those that did ran a normal ${Math.round(f.per)} mi. The fleet ran and Saucon missed it — a telemetry gap, not a real drop. Treat this day as unreliable." aria-label="Telemetry gap — data unreliable"`);
   const mark = f => !f ? '' : (f.kind === 'storm'
-    ? `<span style="color:var(--text2);font-weight:700" title="Service suspended"> &#10052;</span>`
+    ? `<span style="color:var(--text2);font-weight:700" data-tip="Service suspended" aria-label="Service suspended"> &#10052;</span>`
     : `<span style="color:var(--warn);font-weight:700"> &#9888;</span>`);
 
   const body = data.rows.map(r=>{
