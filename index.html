@@ -3254,10 +3254,18 @@ function _ovRowAttr(r){
 
 // ── KPI weekday-comparison context (Owen 2026-07-08: "^10% vs the average
 //    Wednesday so far"). The ONLY quantity with an honest historical series in
-//    the embedded data is booking VELOCITY per sale-date (window.salesByDate):
-//    it survives because the 3099 manifest still covers past trips within its
-//    back-window, and a sale's trip departs on/after the sale date so nothing
-//    rolled off → unbiased. So "Booked Yesterday" gets a true weekday delta.
+//    the embedded data was booking VELOCITY per sale-date (window.salesByDate).
+//    ⚠️ CORRECTED 2026-08-11 (Owen spotted the card looked off): that series was
+//    documented here as "unbiased because a sale's trip departs on/after the sale
+//    date so nothing rolled off". THAT WAS WRONG. The 3099 pull is
+//    ActivityType=Sale + CurrentStatus=Active, so a ticket later CANCELLED
+//    disappears from the sale date it was booked on — historical sale-dates decay.
+//    Measured against the values banked fresh each morning: 0.0% drift at 1 day
+//    old, -0.4% at 2 days, -1.2% at 3, and -1.55% average at 6+ days.
+//    Yesterday sits at 0% decay while its same-weekday baseline had been shaved
+//    ~1.4%, so the card read -1% when like-for-like it was -3%.
+//    "Booked Yesterday" now uses the SAME banked source as the other four cards
+//    (see _ovBookedBySaleDate) — every point age-1, so age-1 vs age-1.
 //    The other KPIs (departures/cancel snapshots, DCC needs-decision, live-fare
 //    raises) have NO surviving daily series — process_2501 archives past trips
 //    to their FINAL snapshot, destroying the historical morning state — so they
@@ -3270,6 +3278,28 @@ function _ovVelocityByDate(){
   const sbd=window.salesByDate||{},per={};
   for(const k in sbd){const days=sbd[k];for(const d in days){per[d]=(per[d]||0)+((days[d]&&days[d].n)||0);}}
   return per;
+}
+// Baseline for "Booked Yesterday", keyed by SALE DATE. Built from the morning-banked
+// KPI history rather than the embedded manifest, because that manifest decays as
+// cancellations drop out (see the corrected note above) — this series is re-measured
+// fresh every morning, so every point is age-1 and undecayed, and yesterday is then
+// compared against like-for-like. Bonus: it is deeper than the ~12 days the manifest
+// embeds (15 mornings and growing), so weekdays reach n>=2 and this card renders
+// "vs avg <Wkdy> · Nwk" in the same form as its four neighbours instead of the odd
+// one out at "vs last <Wkdy>".
+// ⚠️ THE SHIFT IS THE WHOLE POINT: the entry dated D holds the tickets sold on D-1
+// ("booked YESTERDAY", recorded that morning), so it must be re-keyed to D-1. Dates
+// are assembled from local get*() parts, never toISOString(), which would shift the
+// day backwards for anyone west of UTC.
+function _ovBookedBySaleDate(){
+  const byMorning=_ovHistBy('booked_tix'),out={};
+  const p=n=>String(n).padStart(2,'0');
+  for(const iso in byMorning){
+    const d=new Date(iso+'T00:00:00');
+    d.setDate(d.getDate()-1);
+    out[d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())]=byMorning[iso];
+  }
+  return out;
 }
 // Compare a live measured value to the same-weekday baseline from perByIso.
 function _ovWkDelta(perByIso,measured,weekday,todayIso,excludeIso,maxBackDays){
@@ -3477,7 +3507,14 @@ function renderOverview(){
 
   // Booked Yesterday: real weekday delta from booking velocity (the one KPI with
   // an honest embedded baseline). The rest carry today-context, not a fake delta.
-  const _bookedDelta=_ovWkDelta(_ovVelocityByDate(), ydTix, new Date(ydISO+'T00:00:00').getDay(), todayISO, ydISO, 21);
+  // Baseline from the morning-banked series (undecayed), NOT the embedded manifest.
+  // Window widened 21 -> 35 days so the deeper history can actually reach n>=2.
+  const _bookedDelta=_ovWkDelta(_ovBookedBySaleDate(), ydTix, new Date(ydISO+'T00:00:00').getDay(), todayISO, ydISO, 35);
+  // Name the day being measured. This card reports YESTERDAY while the other four
+  // report TODAY, so on a Tuesday it legitimately says "vs avg Mon" beside four
+  // "vs avg Tue"s — which reads like a stale card unless the day is stated. (Owen
+  // flagged exactly that 2026-08-11.)
+  const _ydWhen='<span style="color:var(--text3)">'+fDateS(new Date(ydISO+'T00:00:00'))+' &middot; </span>';
   // Today-context helpers for the KPIs without a weekday baseline:
   // Weighted against each trip's TRUE committed seats (DCC), not trips x 54. (2026-07-28)
   const _todayCapSum=todayTrips.reduce((s,r)=>s+trueCap(r.tix, r.sched, capISO(r.depDate), cap),0);
@@ -3486,7 +3523,7 @@ function renderOverview(){
 
   document.getElementById('ovKpis').innerHTML=
     mkpi('Booked Yesterday', ydTix?ydTix.toLocaleString():'—', 'green',
-      _ovNote(_ovCmpLine(_bookedDelta,true,''), ydRev?'$'+Math.round(ydRev).toLocaleString()+' revenue':'tickets sold (3099)'))+
+      _ovNote(_ydWhen+_ovCmpLine(_bookedDelta,true,''), ydRev?'$'+Math.round(ydRev).toLocaleString()+' revenue':'tickets sold (3099)'))+
     mkpi('Departures Today', todayTrips.length, '',
       _ovHistNote('departures', todayTrips.length, true, todayISO,
         '<span style="color:var(--text3)">avg '+_todayLoadPct+'% full so far</span>',
