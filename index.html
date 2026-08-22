@@ -1635,6 +1635,18 @@ body{
       <input type="password" id="approvalPwInput" placeholder="Approval password" autocomplete="off"
              onkeydown="if(event.key==='Enter')submitApprovals();if(event.key==='Escape')closeApprovalModal()"
              style="width:100%;background:rgba(28,35,30,0.05);border:1px solid var(--border2);border-radius:6px;padding:9px 12px;color:var(--text);font-size:14px;margin-bottom:12px;outline:none;font-family:inherit">
+      <!-- Live batch progress. Polls GET /progress while the /submit request is still
+           in flight; a blocking submit otherwise shows nothing for minutes. -->
+      <div id="approvalProgress" style="display:none;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:11px;margin-bottom:5px">
+          <span id="apPgLabel" style="color:var(--text2);font-weight:600">Starting&hellip;</span>
+          <span id="apPgCount" style="color:var(--text3);font-family:'JetBrains Mono',monospace"></span>
+        </div>
+        <div style="height:9px;background:var(--border2);border-radius:5px;overflow:hidden">
+          <div id="apPgBar" style="height:100%;width:0%;background:var(--good);transition:width .35s ease"></div>
+        </div>
+        <div id="apPgNote" style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.45;min-height:14px"></div>
+      </div>
       <div id="approvalErrorMsg" style="display:none;color:var(--bad);font-size:11px;margin-bottom:10px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button onclick="closeApprovalModal()" style="background:none;border:1px solid var(--border2);border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;color:var(--text2)">Cancel</button>
@@ -5276,6 +5288,7 @@ function openApprovalModal(){
   document.getElementById('approvalExpDate').value='';
   onExpModeChange('approval');
   document.getElementById('approvalErrorMsg').style.display='none';
+  var _pg=document.getElementById('approvalProgress'); if(_pg)_pg.style.display='none';
   document.getElementById('approvalModalOverlay').style.display='flex';
   setTimeout(()=>document.getElementById('approvalPwInput').focus(),50);
 }
@@ -5430,6 +5443,76 @@ function onExpModeChange(which){
   hint.style.display = msg ? '' : 'none';
 }
 
+// ---- Batch progress -------------------------------------------------------
+// /submit is a BLOCKING request that runs the whole batch server-side, so the
+// browser sees nothing until it returns. On 2026-08-22 a failing 11-change batch
+// ran 296s and simply looked frozen. These poll GET /progress DURING the submit.
+// Everything here is best-effort: a progress failure must never affect the write.
+var __apPgTimer=null;
+function _apPg(id){return document.getElementById(id);}
+function apPgReset(total){
+  var w=_apPg('approvalProgress'); if(!w)return;
+  w.style.display='block';
+  _apPg('apPgBar').style.width='0%';
+  _apPg('apPgBar').style.background='var(--good)';
+  _apPg('apPgLabel').textContent='Starting…';
+  _apPg('apPgLabel').style.color='var(--text2)';
+  _apPg('apPgCount').textContent='0 / '+total;
+  _apPg('apPgNote').textContent='';
+}
+function apPgApply(p,total){
+  if(!p||!_apPg('approvalProgress'))return;
+  var tot=p.total||total||0, done=p.done||0;
+  var pct=tot?Math.round(done*100/tot):0;
+  _apPg('apPgBar').style.width=pct+'%';
+  _apPg('apPgCount').textContent=done+' / '+tot;
+  _apPg('apPgLabel').textContent=(p.state==='starting')?'Starting…':'Applying fare changes…';
+  var bits=[];
+  if(p.ok)bits.push(p.ok+' applied');
+  if(p.failed)bits.push(p.failed+' failed');
+  if(p.current)bits.push(p.current);
+  _apPg('apPgNote').textContent=bits.join(' · ');
+  if(p.failed>0)_apPg('apPgBar').style.background='var(--bad)';
+}
+async function apPgPoll(total){
+  try{
+    var r=await fetch(APPROVAL_SERVER+'/progress',{mode:'cors',cache:'no-store'});
+    var p=await r.json(); apPgApply(p,total); return p;
+  }catch(e){ return null; }
+}
+function apPgStart(total){
+  apPgReset(total);
+  if(__apPgTimer)clearInterval(__apPgTimer);
+  __apPgTimer=setInterval(function(){apPgPoll(total);},1200);
+}
+function apPgStop(){ if(__apPgTimer){clearInterval(__apPgTimer);__apPgTimer=null;} }
+function apPgFinal(p,total,okFlag,errMsg){
+  if(!_apPg('approvalProgress'))return;
+  var tot=(p&&p.total)||total||0, ok=(p&&p.ok)||0, failed=(p&&p.failed)||0;
+  var bar=_apPg('apPgBar'), lab=_apPg('apPgLabel'), note=_apPg('apPgNote');
+  bar.style.width='100%';
+  if(okFlag&&failed===0){
+    bar.style.background='var(--good)';
+    lab.style.color='var(--good)';
+    lab.textContent='✓ All '+(ok||tot)+' applied';
+    note.textContent='';
+  }else{
+    bar.style.background='var(--bad)';
+    lab.style.color='var(--bad)';
+    if(p&&p.aborted){
+      lab.textContent='✗ Stopped early after repeated failures';
+      note.textContent=ok+' applied, '+failed+' failed of '+tot+'. The failures looked systematic rather than per-trip, so the batch stopped instead of timing out. '+(errMsg||'');
+    }else if(failed>0){
+      lab.textContent='✗ '+failed+' of '+tot+' failed';
+      note.textContent=ok+' applied. '+(errMsg||'');
+    }else{
+      lab.textContent='✗ Submission failed';
+      note.textContent=errMsg||'';
+    }
+  }
+  _apPg('apPgCount').textContent=(ok+failed)+' / '+tot;
+}
+
 async function submitApprovals(){
   const pw=document.getElementById('approvalPwInput').value;
   if(!pw){
@@ -5468,6 +5551,7 @@ async function submitApprovals(){
   const btn=document.getElementById('approvalConfirmBtn');
   const sp =document.getElementById('approvalSpinner');
   btn.disabled=true;sp.style.display='inline';
+  apPgStart(changes.length);   // poll /progress while /submit blocks
   try{
     const resp=await fetch(APPROVAL_SERVER+'/submit',{
       method:'POST',mode:'cors',
@@ -5476,7 +5560,11 @@ async function submitApprovals(){
     });
     const j=await resp.json();
     if(resp.ok&&j.ok){
-      closeApprovalModal();
+      // Final counts come from the beacon, not from j.message (which only says
+      // "queued" and cannot report per-change outcomes).
+      apPgStop();
+      apPgFinal(await apPgPoll(changes.length), changes.length, true, "");
+      setTimeout(closeApprovalModal, 1500);
       // Clear selections after successful submit
       sugClearAll();
       // Refresh applied-history so the new entries show as "just now" badges
@@ -5488,12 +5576,18 @@ async function submitApprovals(){
       document.body.appendChild(banner);
       setTimeout(()=>banner.remove(),6000);
     } else {
+      apPgStop();
+      apPgFinal(await apPgPoll(changes.length), changes.length, false, j.error||'');
       showApprovalError(j.error||'Submission failed.');
     }
   } catch(e){
+    apPgStop();
+    apPgFinal(await apPgPoll(changes.length), changes.length, false,
+              'The browser stopped waiting (the batch may still be running server-side) — '+e.message);
     showApprovalError('Cannot reach approval server: '+e.message);
   } finally {
     btn.disabled=false;sp.style.display='none';
+    apPgStop();
   }
 }
 function showApprovalError(msg){
