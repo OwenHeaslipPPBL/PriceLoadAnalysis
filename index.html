@@ -1646,6 +1646,7 @@ body{
           <div id="apPgBar" style="height:100%;width:0%;background:var(--good);transition:width .35s ease"></div>
         </div>
         <div id="apPgNote" style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.45;min-height:14px"></div>
+        <div id="apPgDupNote" style="font-size:10.5px;color:var(--warn);margin-top:4px;line-height:1.45"></div>
       </div>
       <div id="approvalErrorMsg" style="display:none;color:var(--bad);font-size:11px;margin-bottom:10px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -5483,6 +5484,7 @@ function apPgReset(total){
   _apPg('apPgLabel').style.color='var(--text2)';
   _apPg('apPgCount').textContent='0 / '+total;
   _apPg('apPgNote').textContent='';
+  var _dn=_apPg('apPgDupNote'); if(_dn)_dn.textContent='';
 }
 function apPgApply(p,total){
   if(!p||!_apPg('approvalProgress'))return;
@@ -5575,19 +5577,37 @@ async function submitApprovals(){
   const btn=document.getElementById('approvalConfirmBtn');
   const sp =document.getElementById('approvalSpinner');
   btn.disabled=true;sp.style.display='inline';
-  apPgStart(changes.length);   // poll /progress while /submit blocks
+  // Providence is fare-scraped at TWO NYC-side stops (Bus Terminal + Downtown), so
+  // ONE trip shows up as TWO selectable rows. apply_fare_changes already writes both
+  // stops for a single change, so sending both makes the second write land on the slot
+  // the first just created -- a FareUUID collision -> MMC 500. That is exactly how
+  // 0213B and 0229B failed on 2026-08-23 (both were [new override], so no prior UUID
+  // existed to reuse). Collapse to one change per trip, and SAY SO rather than quietly
+  // shrinking the batch.
+  const _byTrip=new Map();
+  changes.forEach(function(c){
+    const k=[c.corridor,c.direction,c.date,c.schedule].join('|');
+    if(!_byTrip.has(k))_byTrip.set(k,c);
+  });
+  const changesToSend=Array.from(_byTrip.values());
+  const _collapsed=changes.length-changesToSend.length;
+  apPgStart(changesToSend.length);   // poll /progress while /submit blocks
+  if(_collapsed>0){
+    const n=document.getElementById('apPgDupNote');
+    if(n)n.textContent=_collapsed+' duplicate selection'+(_collapsed>1?'s':'')+' collapsed — Providence lists each trip once per NYC stop, and one change already updates both.';
+  }
   try{
     const resp=await fetch(APPROVAL_SERVER+'/submit',{
       method:'POST',mode:'cors',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({password:pw,changes})
+      body:JSON.stringify({password:pw,changes:changesToSend})
     });
     const j=await resp.json();
     if(resp.ok&&j.ok){
       // Final counts come from the beacon, not from j.message (which only says
       // "queued" and cannot report per-change outcomes).
       apPgStop();
-      apPgFinal(await apPgPoll(changes.length), changes.length, true, "");
+      apPgFinal(await apPgPoll(changesToSend.length), changesToSend.length, true, "");
       setTimeout(closeApprovalModal, 1500);
       // Clear selections after successful submit
       sugClearAll();
@@ -5601,12 +5621,12 @@ async function submitApprovals(){
       setTimeout(()=>banner.remove(),6000);
     } else {
       apPgStop();
-      apPgFinal(await apPgPoll(changes.length), changes.length, false, j.error||'');
+      apPgFinal(await apPgPoll(changesToSend.length), changesToSend.length, false, j.error||'');
       showApprovalError(j.error||'Submission failed.');
     }
   } catch(e){
     apPgStop();
-    apPgFinal(await apPgPoll(changes.length), changes.length, false,
+    apPgFinal(await apPgPoll(changesToSend.length), changesToSend.length, false,
               'The browser stopped waiting (the batch may still be running server-side) — '+e.message);
     showApprovalError('Cannot reach approval server: '+e.message);
   } finally {
