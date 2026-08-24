@@ -1304,11 +1304,17 @@ body{
       <!-- Own wrapper + own sync — _syncChips() only searches inside `.filters`, and a
            chip added to a row it does not cover silently never highlights (the 8/04 bug). -->
       <span id="sugDaysChips" style="display:contents">
-        <span class="chip active" data-mind="0" data-tip="No departure-date floor — every trip in the current filters." aria-label="No departure-date floor." onclick="setSugMinDays(0,this)">Any date</span>
-        <span class="chip" data-mind="1" data-tip="Exclude trips departing today." aria-label="Exclude trips departing today." onclick="setSugMinDays(1,this)">Skip today</span>
-        <span class="chip" data-mind="2" data-tip="Exclude today and tomorrow — leaves the near-in departures alone." aria-label="Exclude today and tomorrow." onclick="setSugMinDays(2,this)">Skip today + tmrw</span>
-        <span class="chip" data-mind="4" data-tip="Only trips departing 4 or more days out." aria-label="Only trips departing 4 or more days out." onclick="setSugMinDays(4,this)">4+ days</span>
-        <span class="chip" data-mind="8" data-tip="Only trips departing 8 or more days out." aria-label="Only trips departing 8 or more days out." onclick="setSugMinDays(8,this)">8+ days</span>
+        <!-- Colm Lynch 2026-08-24: "replace the buttons for skip today / skip today and
+             tomorrow etc with a date range selector". A floor could only ever trim from
+             the near end; a range also trims the far end, which is what scoping a batch
+             to a specific week actually needs. -->
+        <input type="date" id="sugDateFrom" onchange="setSugDateRange()" data-tip="Only trips departing on or after this date." aria-label="Departing from date"
+               style="background:rgba(28,35,30,0.05);border:1px solid var(--border2);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit">
+        <span style="color:var(--text3);font-size:11px">to</span>
+        <input type="date" id="sugDateTo" onchange="setSugDateRange()" data-tip="Only trips departing on or before this date." aria-label="Departing to date"
+               style="background:rgba(28,35,30,0.05);border:1px solid var(--border2);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit">
+        <span class="chip" onclick="clearSugDateRange()" data-tip="Clear the departure-date range." aria-label="Clear date range">Clear</span>
+        <span id="sugRangeCount" style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace"></span>
       </span>
       <span class="chip" style="color:var(--good)" onclick="setFA('Raise',this)">↑ Raise</span>
       <!-- Match retired 2026-05-29 (v4 has no Match action): <span class="chip" style="color:#f97316" onclick="setFA('Match',this)">≈ Match</span> -->
@@ -3962,6 +3968,18 @@ let ppbFares=[],flixFares=[],priorPpbMap={},fcFilter='Boston',fdFilter='All',faF
 // says that directly without needing two date pickers.
 // var (not let): read during the initial render, per the TDZ rule.
 var sugMinDays=0;
+var sugDateFrom='', sugDateTo='';
+function setSugDateRange(){
+  var f=document.getElementById('sugDateFrom'), t=document.getElementById('sugDateTo');
+  sugDateFrom=(f&&f.value)||''; sugDateTo=(t&&t.value)||'';
+  renderFares();
+}
+function clearSugDateRange(){
+  var f=document.getElementById('sugDateFrom'), t=document.getElementById('sugDateTo');
+  if(f)f.value=''; if(t)t.value='';
+  sugDateFrom=''; sugDateTo=''; sugMinDays=0;
+  renderFares();
+}
 function setSugMinDays(v,btn){
   sugMinDays=+v;
   document.querySelectorAll('#sugDaysChips [data-mind]').forEach(function(c){
@@ -5554,6 +5572,37 @@ function apPgStart(total){
   __apPgTimer=setInterval(function(){apPgPoll(total);},1200);
 }
 function apPgStop(){ if(__apPgTimer){clearInterval(__apPgTimer);__apPgTimer=null;} }
+// RECONCILE — Colm Lynch, 2026-08-24: "Was the script still running perhaps, and the
+// dashboard did not realize it? Could the dashboard include a verification step to see
+// where the script really ended?" He was right. His connection dropped 196s into a
+// 297s run; the dashboard took one last poll (164/317), reported THAT as final, and the
+// server went on to write 94 more changes. The last thing the browser saw is NOT the
+// outcome. So on a disconnect we now WATCH THE BEACON until it stops moving, and report
+// what the server actually did.
+async function apPgReconcile(totalExpected){
+  var lastDone=-1,lastUpd='',still=0,seen=null;
+  var lab=_apPg('apPgLabel');
+  if(lab){ lab.textContent='Connection lost — checking what the server actually did…';
+           lab.style.color='var(--warn)'; }
+  for(var i=0;i<300;i++){          // up to ~10 min at 2s
+    var p=null;
+    try{
+      var r=await fetch(APPROVAL_SERVER+'/progress',{mode:'cors',cache:'no-store'});
+      p=await r.json();
+    }catch(e){ p=null; }
+    if(p&&typeof p.done==="number"){
+      seen=p;
+      apPgApply(p,totalExpected);
+      if(lab){ lab.textContent='Connection lost — server still working…'; }
+      if(p.state==='complete') return p;
+      // Beacon frozen => the run died (killed/crashed) and will never say "complete".
+      if(p.done===lastDone && p.updated===lastUpd){ still++; if(still>=8) return p; }
+      else { still=0; lastDone=p.done; lastUpd=p.updated; }
+    }
+    await new Promise(function(res){setTimeout(res,2000);});
+  }
+  return seen;
+}
 function apPgFinal(p,total,okFlag,errMsg){
   if(!_apPg('approvalProgress'))return;
   var tot=(p&&p.total)||total||0, ok=(p&&p.ok)||0, failed=(p&&p.failed)||0;
@@ -5692,11 +5741,22 @@ async function submitApprovals(){
     }
   } catch(e){
     apPgStop();
+    // Do NOT report the last thing we saw as the outcome -- the server keeps working
+    // after the browser gives up (Colm, 2026-08-24). Watch the beacon to a terminal state.
+    const _rec=await apPgReconcile(changesToSend.length);
+    if(_rec){ _applied+=(_rec.ok||0); _failedN+=(_rec.failed||0); }
+    const _verified=!!_rec;
     apPgFinal(_mkP(), changesToSend.length, false,
-              _applied+' of '+changesToSend.length+' were applied before the connection dropped; '
-              +'the chunk in flight may still be running server-side. '+e.message);
-    showApprovalError('Cannot reach approval server: '+e.message
-              +'  — '+_applied+' of '+changesToSend.length+' already applied.');
+              (_verified
+                ? 'Connection dropped, but the server was still working — verified against it '
+                  +'afterwards: '+_applied+' of '+changesToSend.length+' actually applied'
+                  +(_rec.state==='complete'?'.':' before the run stopped.')
+                : 'Connection dropped and the server could not be re-checked, so the true count '
+                  +'is unknown — at least '+_applied+' of '+changesToSend.length+' applied.')
+              +'  '+e.message);
+    showApprovalError('Lost the connection to the approval server'
+              +(_verified?(' — verified afterwards: '+_applied+' of '+changesToSend.length
+                           +' actually applied.'):' and could not verify what landed.'));
   } finally {
     btn.disabled=false;sp.style.display='none';
     apPgStop();
@@ -5716,6 +5776,15 @@ function renderSuggestionsTable(rows){
   // Cache for the approval submit so we can rebuild the change-dict from the
   // selected row keys without re-running buildTripRows.
   __sugLastRows=rows.slice();
+  // Live count for batch scoping. Colm asked for filtering to get a batch "to 150 or
+  // under" -- that ceiling is gone now that a submit is chunked, but knowing the size of
+  // what you are about to approve before you approve it is worth having regardless.
+  (function(){
+    var el=document.getElementById('sugRangeCount'); if(!el)return;
+    var n=rows.filter(function(r){return r.action==='Raise'||r.action==='Lower';}).length;
+    el.textContent=n?(n+' actionable'):'none actionable';
+    el.style.color=n?'var(--text3)':'var(--text3)';
+  })();
   // Apply sort
   if(sugSortBy==='priority'){
     // Rank actionable rows by load × |gap%|. Holds/N-A sink to bottom.
@@ -6150,7 +6219,7 @@ function renderFares(){
   // Departure floor. Applied HERE (not at render) so the KPI counts, the priority sort
   // and "Select all actionable" all see the same set — select-all works off the rendered
   // checkboxes, so filtering here is what makes it safe to click.
-  const daysFilter=r=>sugMinDays<=0||(r.daysOut!=null&&r.daysOut>=sugMinDays);
+  const daysFilter=r=>(sugMinDays<=0||(r.daysOut!=null&&r.daysOut>=sugMinDays))&&(!sugDateFrom||(r.dateISO&&r.dateISO>=sugDateFrom))&&(!sugDateTo||(r.dateISO&&r.dateISO<=sugDateTo));
   renderSuggestionsTable(tripRows.filter(r=>cdFilter(r)&&actionFilter(r)&&daysFilter(r)));
 }
 
