@@ -1656,7 +1656,7 @@ body{
       </div>
       <div id="approvalErrorMsg" style="display:none;color:var(--bad);font-size:11px;margin-bottom:10px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button onclick="closeApprovalModal()" style="background:none;border:1px solid var(--border2);border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;color:var(--text2)">Cancel</button>
+        <button id="approvalCancelBtn" onclick="cancelApprovalBatch()" style="background:none;border:1px solid var(--border2);border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;color:var(--text2)">Cancel</button>
         <button id="approvalConfirmBtn" onclick="submitApprovals()" style="background:var(--good);color:#000;border:none;border-radius:6px;padding:7px 18px;font-size:12px;font-weight:700;cursor:pointer">
           Confirm &amp; Submit <span id="approvalSpinner" style="display:none;margin-left:4px">…</span>
         </button>
@@ -5531,6 +5531,29 @@ var __apPgTimer=null;
 // A batch is submitted in CHUNKS (see submitApprovals), and the server beacon is
 // per-request, so the bar has to accumulate across chunks or it would restart at 0.
 var __apPgTotal=0, __apPgOffset=0, __apPgOkBase=0, __apPgFailBase=0;
+var __apPgInFlight=false, __apPgCancelRequested=false;
+// Cancel that actually cancels. Before this, the button only closed the modal while the
+// server-side batch ran to completion -- Owen cancelled on 2026-08-22 and 8 fare changes
+// applied anyway. It now signals the applier, which stops at a CHANGE BOUNDARY so a
+// 6-row fare write is never left half-applied. Already-applied changes are NOT rolled
+// back -- this stops further writes, it does not undo.
+async function cancelApprovalBatch(){
+  if(!__apPgInFlight){ closeApprovalModal(); return; }
+  var pwEl=document.getElementById('approvalPwInput');
+  var pw=(pwEl&&pwEl.value)||'';
+  __apPgCancelRequested=true;                 // stops further CHUNKS being sent
+  var lab=_apPg('apPgLabel');
+  if(lab){ lab.textContent='Stopping… finishing the change in progress'; lab.style.color='var(--warn)'; }
+  try{
+    var r=await fetch(APPROVAL_SERVER+'/cancel',{method:'POST',mode:'cors',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+    var j=await r.json();
+    if(!(r.ok&&j.ok)) showApprovalError((j&&j.error)||'Could not signal cancel.');
+  }catch(e){
+    showApprovalError('Could not reach the server to cancel: '+e.message
+      +'  — further chunks will not be sent, but the chunk already running may finish.');
+  }
+}
 function _apPg(id){return document.getElementById(id);}
 function apPgReset(total){
   var w=_apPg('approvalProgress'); if(!w)return;
@@ -5616,7 +5639,11 @@ function apPgFinal(p,total,okFlag,errMsg){
   }else{
     bar.style.background='var(--bad)';
     lab.style.color='var(--bad)';
-    if(p&&p.aborted){
+    if(p&&p.cancelled){
+      lab.textContent='✗ Cancelled — stopped after '+ok+' of '+tot;
+      note.textContent='Stopped at a change boundary, so nothing is half-written. The '+ok+
+        ' already applied are LIVE and were not rolled back.';
+    }else if(p&&p.aborted){
       lab.textContent='✗ Stopped early after repeated failures';
       note.textContent=ok+' applied, '+failed+' failed of '+tot+'. The failures looked systematic rather than per-trip, so the batch stopped instead of timing out. '+(errMsg||'');
     }else if(failed>0){
@@ -5683,6 +5710,8 @@ async function submitApprovals(){
   const changesToSend=Array.from(_byTrip.values());
   const _collapsed=changes.length-changesToSend.length;
   apPgStart(changesToSend.length);   // poll /progress while /submit blocks
+  __apPgInFlight=true; __apPgCancelRequested=false;
+  (function(){var c=document.getElementById('approvalCancelBtn'); if(c)c.textContent='Stop batch';})();
   if(_collapsed>0){
     const n=document.getElementById('apPgDupNote');
     if(n)n.textContent=_collapsed+' duplicate selection'+(_collapsed>1?'s':'')+' collapsed — Providence lists each trip once per NYC stop, and one change already updates both.';
@@ -5697,10 +5726,13 @@ async function submitApprovals(){
   const CHUNK_SIZE=100;
   let _applied=0,_failedN=0,_lastErr='',_stopped=false;
   const _mkP=()=>({total:changesToSend.length,done:_applied+_failedN,
-                   ok:_applied,failed:_failedN,aborted:false});
+                   ok:_applied,failed:_failedN,aborted:false,cancelled:__apPgCancelRequested});
   try{
     let resp=null,j=null;
     for(let _i=0;_i<changesToSend.length;_i+=CHUNK_SIZE){
+      // Operator asked to stop: send no further chunks. The chunk already in flight
+      // stops server-side at its next change boundary.
+      if(__apPgCancelRequested){ _stopped=true; _lastErr="Cancelled by operator."; break; }
       const _slice=changesToSend.slice(_i,_i+CHUNK_SIZE);
       __apPgOffset=_applied+_failedN; __apPgOkBase=_applied; __apPgFailBase=_failedN;
       resp=await fetch(APPROVAL_SERVER+'/submit',{
@@ -5759,6 +5791,8 @@ async function submitApprovals(){
                            +' actually applied.'):' and could not verify what landed.'));
   } finally {
     btn.disabled=false;sp.style.display='none';
+    __apPgInFlight=false;
+    (function(){var c=document.getElementById('approvalCancelBtn'); if(c)c.textContent='Cancel';})();
     apPgStop();
   }
 }
