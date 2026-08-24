@@ -5498,6 +5498,9 @@ function onExpModeChange(which){
 // ran 296s and simply looked frozen. These poll GET /progress DURING the submit.
 // Everything here is best-effort: a progress failure must never affect the write.
 var __apPgTimer=null;
+// A batch is submitted in CHUNKS (see submitApprovals), and the server beacon is
+// per-request, so the bar has to accumulate across chunks or it would restart at 0.
+var __apPgTotal=0, __apPgOffset=0, __apPgOkBase=0, __apPgFailBase=0;
 function _apPg(id){return document.getElementById(id);}
 function apPgReset(total){
   var w=_apPg('approvalProgress'); if(!w)return;
@@ -5509,20 +5512,23 @@ function apPgReset(total){
   _apPg('apPgCount').textContent='0 / '+total;
   _apPg('apPgNote').textContent='';
   var _dn=_apPg('apPgDupNote'); if(_dn)_dn.textContent='';
+  __apPgTotal=total; __apPgOffset=0; __apPgOkBase=0; __apPgFailBase=0;
 }
 function apPgApply(p,total){
   if(!p||!_apPg('approvalProgress'))return;
-  var tot=p.total||total||0, done=p.done||0;
+  var tot=__apPgTotal||p.total||total||0;
+  var done=__apPgOffset+(p.done||0);
+  var okN=__apPgOkBase+(p.ok||0), failN=__apPgFailBase+(p.failed||0);
   var pct=tot?Math.round(done*100/tot):0;
   _apPg('apPgBar').style.width=pct+'%';
   _apPg('apPgCount').textContent=done+' / '+tot;
   _apPg('apPgLabel').textContent=(p.state==='starting')?'Starting…':'Applying fare changes…';
   var bits=[];
-  if(p.ok)bits.push(p.ok+' applied');
-  if(p.failed)bits.push(p.failed+' failed');
+  if(okN)bits.push(okN+' applied');
+  if(failN)bits.push(failN+' failed');
   if(p.current)bits.push(p.current);
   _apPg('apPgNote').textContent=bits.join(' · ');
-  if(p.failed>0)_apPg('apPgBar').style.background='var(--bad)';
+  if(failN>0)_apPg('apPgBar').style.background='var(--bad)';
 }
 async function apPgPoll(total){
   try{
@@ -5620,18 +5626,41 @@ async function submitApprovals(){
     const n=document.getElementById('apPgDupNote');
     if(n)n.textContent=_collapsed+' duplicate selection'+(_collapsed>1?'s':'')+' collapsed — Providence lists each trip once per NYC stop, and one change already updates both.';
   }
+  // CHUNKED SUBMIT. /submit runs the whole batch in one blocking subprocess, so a big
+  // batch used to race a hard ceiling: on 2026-08-24 two 317-change Philadelphia batches
+  // were KILLED at exactly 299s, having already written 258 changes live to MMC, and the
+  // operator saw only "Failed to fetch" with no idea what had landed. Throughput is
+  // ~1.2s per change, so ~100 per request keeps every call near 2 minutes regardless of
+  // how many rows are selected. Chunks run SEQUENTIALLY -- never in parallel, which would
+  // put two writers on the same override table.
+  const CHUNK_SIZE=100;
+  let _applied=0,_failedN=0,_lastErr='',_stopped=false;
+  const _mkP=()=>({total:changesToSend.length,done:_applied+_failedN,
+                   ok:_applied,failed:_failedN,aborted:false});
   try{
-    const resp=await fetch(APPROVAL_SERVER+'/submit',{
-      method:'POST',mode:'cors',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({password:pw,changes:changesToSend})
-    });
-    const j=await resp.json();
-    if(resp.ok&&j.ok){
+    let resp=null,j=null;
+    for(let _i=0;_i<changesToSend.length;_i+=CHUNK_SIZE){
+      const _slice=changesToSend.slice(_i,_i+CHUNK_SIZE);
+      __apPgOffset=_applied+_failedN; __apPgOkBase=_applied; __apPgFailBase=_failedN;
+      resp=await fetch(APPROVAL_SERVER+'/submit',{
+        method:'POST',mode:'cors',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({password:pw,changes:_slice})
+      });
+      j=await resp.json();
+      // Count from the beacon (authoritative per-change outcome), falling back to the
+      // slice size so a beacon hiccup cannot make a completed chunk look like zero.
+      const _p=await apPgPoll(changesToSend.length);
+      const _ok=(_p&&typeof _p.ok==='number')?_p.ok:((resp.ok&&j&&j.ok)?_slice.length:0);
+      const _bad=(_p&&typeof _p.failed==='number')?_p.failed:0;
+      _applied+=_ok; _failedN+=_bad;
+      if(!(resp.ok&&j&&j.ok)){ _lastErr=(j&&j.error)||'Submission failed.'; _stopped=true; break; }
+    }
+    if(!_stopped&&_failedN===0){
       // Final counts come from the beacon, not from j.message (which only says
       // "queued" and cannot report per-change outcomes).
       apPgStop();
-      apPgFinal(await apPgPoll(changesToSend.length), changesToSend.length, true, "");
+      apPgFinal(_mkP(), changesToSend.length, true, "");
       setTimeout(closeApprovalModal, 1500);
       // Clear selections after successful submit
       sugClearAll();
@@ -5645,14 +5674,17 @@ async function submitApprovals(){
       setTimeout(()=>banner.remove(),6000);
     } else {
       apPgStop();
-      apPgFinal(await apPgPoll(changesToSend.length), changesToSend.length, false, j.error||'');
-      showApprovalError(j.error||'Submission failed.');
+      apPgFinal(_mkP(), changesToSend.length, false, _lastErr);
+      showApprovalError((_lastErr||'Submission failed.')
+        +'  — '+_applied+' of '+changesToSend.length+' were applied before it stopped.');
     }
   } catch(e){
     apPgStop();
-    apPgFinal(await apPgPoll(changesToSend.length), changesToSend.length, false,
-              'The browser stopped waiting (the batch may still be running server-side) — '+e.message);
-    showApprovalError('Cannot reach approval server: '+e.message);
+    apPgFinal(_mkP(), changesToSend.length, false,
+              _applied+' of '+changesToSend.length+' were applied before the connection dropped; '
+              +'the chunk in flight may still be running server-side. '+e.message);
+    showApprovalError('Cannot reach approval server: '+e.message
+              +'  — '+_applied+' of '+changesToSend.length+' already applied.');
   } finally {
     btn.disabled=false;sp.style.display='none';
     apPgStop();
