@@ -218,6 +218,7 @@ table.pivot th.s1{z-index:25;} table.pivot th.s2{z-index:25;} table.pivot th.s3{
 table.dt th.hp-grp{text-align:center;color:var(--text2);border-bottom:1px solid var(--border);}
 #panel-holiday table.dt td{white-space:nowrap;}
 #od-tip.hp-wide{max-width:700px;}
+#panel-holiday td.hp-hov{cursor:help;text-decoration:underline dotted;text-decoration-color:var(--border2);text-underline-offset:3px;}
 #od-tip .hp-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:20px;}
 #od-tip .hp-trip{padding:4px 0;border-bottom:1px solid var(--border);}
 #od-tip .hp-trip:last-child{border-bottom:none;}
@@ -7268,6 +7269,16 @@ function hpStopsTip(ev,key){
     }).join('')+'</div>';
   tip.classList.add('show');posODTip(ev);
 }
+// Summary-table breakdowns: every number opens its day-by-day detail (Owen 2026-09-16).
+var __hpBreak={};
+function hpBreakTip(ev,key){
+  const tip=document.getElementById('od-tip');if(!tip)return;
+  const html=__hpBreak[key];
+  if(!html){tip.classList.remove('show');return;}
+  tip.classList.add('hp-wide');
+  tip.innerHTML=html;
+  tip.classList.add('show');posODTip(ev);
+}
 function hpCurve(c,dOut){
   const ly=c.curve.ly||{},ty=c.curve.ty||{};
   const keys=Object.keys(ly).map(Number);
@@ -7333,17 +7344,52 @@ function renderHoliday(){
     mkpi('Expected',_hpN(all.proj),'',`last year × pace, blended early on`)+
     mkpi('Buses to add',_hpN(all.short),all.short>0?'red':'green',`${_hpN(all.sched)} scheduled now vs ${_hpN(all.need)} needed`);
 
-  sum.innerHTML='<thead><tr><th rowspan="2">Direction</th><th colspan="4" class="hp-grp">Last year</th><th colspan="6" class="hp-grp">This year</th></tr>'
-    +'<tr><th>People</th><th data-tip="Buses that actually went, from the bus number on each ticket">Buses went</th>'
-    +'<th data-tip="People ÷ seats per bus, rounded up, per travel day">Needed</th><th data-tip="People ÷ (buses × seats)">Load</th>'
-    +'<th>Sold</th><th data-tip="Tickets last year had sold at the same number of days before travel">LY at this point</th>'
-    +'<th>Pace</th><th data-tip="Last year\'s final × pace, blended toward last year until sales build">Expected</th>'
-    +'<th data-tip="Buses dispatch has committed now">Scheduled</th><th data-tip="Per-day shortfalls added up">Buses to add</th></tr></thead><tbody>'
-    +h.corridors.map((c,i)=>{const t=tots[i];
-      return `<tr style="cursor:pointer" onclick="hpPick(${cors.indexOf(c.corridor)})"><td style="font-weight:700">${_hpEsc(c.direction)}</td>`
-        +`<td>${_hpN(t.people)}</td><td>${_hpN(t.lyBuses)}</td><td>${_hpN(t.lyNeed)}</td>${_hpLoad(t.load)}`
-        +`<td>${_hpN(t.sold)}</td><td>${_hpN(t.same)}</td><td>${t.pace==null?'—':t.pace+'%'}</td><td>${_hpN(t.proj)}</td><td>${_hpN(t.sched)}</td>`
-        +(t.short>0?`<td style="color:var(--bad);font-weight:800">+${t.short}</td>`:'<td style="color:var(--good);font-weight:700">0</td>')+'</tr>';
+  // Headers name the year outright ("is Sold this year?" -- Owen). Every number that is a sum of
+  // travel days opens its day-by-day breakdown, including the math for Needed and Expected.
+  __hpBreak={};
+  const lyY=h.ly_year, tyY=h.year;
+  const hov=(i,key,html,style)=>{__hpBreak[i+'|'+key]=html;
+    return `<td class="hp-hov"${style?' style="'+style+'"':''} onmouseenter="hpBreakTip(event,'${i}|${key}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()">`;};
+  const line=(l,v)=>`<div class="od-row"><span class="od-seg">${l}</span><span class="od-cnt">${v}</span></div>`;
+  const pl=(n,w)=>`${_hpN(n)} ${w}${n===1?'':(w==='bus'?'es':'s')}`;
+  sum.innerHTML=`<thead><tr><th rowspan="2">Direction</th><th colspan="4" class="hp-grp">Last year · ${_hpEsc(h.label)} ${lyY}</th><th colspan="6" class="hp-grp">This year · ${_hpEsc(h.label)} ${tyY}</th></tr>`
+    +`<tr><th>People</th><th>Buses went</th><th>Needed</th><th data-tip="People ÷ (buses that went × seats)">Load</th>`
+    +`<th>Sold so far</th><th data-tip="What ${lyY} had sold at the same number of days before travel">${lyY} by this point</th>`
+    +`<th data-tip="Sold so far ÷ ${lyY} by this point">Pace</th><th>Expected final</th><th>Buses scheduled</th><th>Buses to add</th></tr></thead><tbody>`
+    +h.corridors.map((c,i)=>{
+      const t=tots[i], d=c.days, seats=(d[0]&&d[0].ly.seats_per_bus)||54, dir=_hpEsc(c.direction);
+      const people=`<div class="od-head">${dir} · people who traveled, ${lyY}</div>`
+        +d.map(r=>line(_hpDay(r.ly.date),pl(r.ly.people,'person').replace(/persons$/,'people').replace(/person$/,r.ly.people===1?'person':'people'))).join('')
+        +`<div class="od-foot">Whole holiday: ${_hpN(t.people)} people</div>`;
+      const buses=`<div class="od-head">${dir} · buses that went, ${lyY}</div>`
+        +d.map(r=>line(_hpDay(r.ly.date),`${pl(r.ly.buses,'bus')} · ${pl(r.ly.trips,'trip')}`)).join('')
+        +`<div class="od-foot">Whole holiday: ${pl(t.lyBuses,'bus')}, counted from the bus number on each ticket.</div>`;
+      const need=`<div class="od-head">${dir} · buses needed at optimal capacity, ${lyY}</div>`
+        +d.map(r=>line(_hpDay(r.ly.date),`${_hpN(r.ly.people)} people ÷ ${seats} per bus = ${(r.ly.people/seats).toFixed(1)} → ${pl(r.ly.buses_needed,'bus')}`)).join('')
+        +`<div class="od-foot">People who traveled, divided by ${seats} per bus and rounded up each day: ${pl(t.lyNeed,'bus')} needed at optimal capacity, vs ${pl(t.lyBuses,'bus')} that went.</div>`;
+      const sold=`<div class="od-head">${dir} · tickets sold so far for ${tyY}</div>`
+        +d.map(r=>line(_hpDay(r.date),`${_hpN(r.ty.sold)} sold · ${lyY} had ${_hpN(r.ly.at_same_point)} by now`)).join('')
+        +`<div class="od-foot">This year's tickets so far, next to what ${lyY} had sold at the same number of days before travel.</div>`;
+      const exp=`<div class="od-head">${dir} · expected final for ${tyY}</div>`
+        +d.map(r=>line(_hpDay(r.date),r.ty.projected==null?'—':`${_hpN(r.ly.people)} × ${r.ty.pace_blended_pct}% pace ≈ ${_hpN(r.ty.projected)}`)).join('')
+        +`<div class="od-foot">${lyY}'s final × this year's pace. Pace is blended toward last year until sales build.</div>`;
+      const sch=`<div class="od-head">${dir} · scheduled now for ${tyY}</div>`
+        +d.map(r=>line(_hpDay(r.date),`${pl(r.ty.buses,'bus')} · ${pl(r.ty.trips,'trip')}`+(r.ty.shut_off?` · ${r.ty.shut_off} shut off`:''))).join('')
+        +`<div class="od-foot">Dispatch's current plan. Set-ins and doubles are usually added closer to the date.</div>`;
+      const add=`<div class="od-head">${dir} · buses to add for ${tyY}</div>`
+        +d.map(r=>line(_hpDay(r.date),r.ty.gap==null?'—':`needs ${r.ty.buses_needed}, scheduled ${r.ty.buses} → `
+          +(r.ty.gap>0?`+${r.ty.gap}`:r.ty.gap<0?`${-r.ty.gap} spare`:'on target'))).join('')
+        +`<div class="od-foot">Only shortfalls are added up: a spare bus one day cannot cover a missing one on another.</div>`;
+      return `<tr style="cursor:pointer" onclick="hpPick(${cors.indexOf(c.corridor)})"><td style="font-weight:700">${dir}</td>`
+        +hov(i,'people',people)+`${_hpN(t.people)}</td>`
+        +hov(i,'buses',buses)+`${_hpN(t.lyBuses)}</td>`
+        +hov(i,'need',need)+`${_hpN(t.lyNeed)}</td>`
+        +_hpLoad(t.load)
+        +hov(i,'sold',sold)+`${_hpN(t.sold)}</td>`
+        +`<td>${_hpN(t.same)}</td><td>${t.pace==null?'—':t.pace+'%'}</td>`
+        +hov(i,'exp',exp)+`${_hpN(t.proj)}</td>`
+        +hov(i,'sch',sch)+`${_hpN(t.sched)}</td>`
+        +hov(i,'add',add,t.short>0?'color:var(--bad);font-weight:800':'color:var(--good);font-weight:700')+(t.short>0?`+${t.short}`:'0')+'</td></tr>';
     }).join('')+'</tbody>';
 
   __hpStops={};
@@ -7366,12 +7412,12 @@ function renderHoliday(){
       +`<div class="ov-panel-head"><div class="ov-panel-title">${_hpEsc(c.direction)}</div><span style="font-size:10px;color:var(--text3)">${seats} seats per bus</span></div>`
       +`<div style="padding:10px 14px 4px">${hpCurve(c,dOut)}</div>`
       +`<div class="table-wrap" style="border:none;border-radius:0"><table class="dt"><thead>`
-      +`<tr><th rowspan="2">Travel day</th><th colspan="5" class="hp-grp">Last year</th><th colspan="8" class="hp-grp">This year</th></tr>`
-      +`<tr><th data-tip="Hover a number for every trip by departure time">Trips</th><th data-tip="Buses that actually went, from the bus number on each ticket">Buses</th><th>People</th>`
-      +`<th data-tip="People ÷ seats per bus, rounded up">Needed</th><th data-tip="People ÷ (buses × seats)">Load</th>`
-      +`<th data-tip="Trips dispatch has scheduled now; hover for every trip by departure time">Trips</th><th data-tip="Buses dispatch has committed now">Buses</th><th>Sold</th>`
-      +`<th data-tip="Tickets last year had sold at the same number of days before travel">LY at this point</th><th data-tip="Sold ÷ last year at this point">Pace</th>`
-      +`<th data-tip="Last year's final × pace, blended toward last year until sales build">Expected</th><th data-tip="Expected ÷ seats per bus, rounded up">Needed</th>`
+      +`<tr><th rowspan="2">Travel day</th><th colspan="5" class="hp-grp">Last year · ${_hpEsc(h.label)} ${h.ly_year}</th><th colspan="8" class="hp-grp">This year · ${_hpEsc(h.label)} ${h.year}</th></tr>`
+      +`<tr><th data-tip="Hover a number for every trip by departure time">Trips</th><th data-tip="Buses that actually went, from the bus number on each ticket">Buses went</th><th>People</th>`
+      +`<th data-tip="People ÷ ${seats} per bus, rounded up">Needed</th><th data-tip="People ÷ (buses that went × seats)">Load</th>`
+      +`<th data-tip="Trips dispatch has scheduled now; hover for every trip by departure time">Trips scheduled</th><th data-tip="Buses dispatch has committed now">Buses scheduled</th><th>Sold so far</th>`
+      +`<th data-tip="What ${h.ly_year} had sold at the same number of days before travel">${h.ly_year} by this point</th><th data-tip="Sold so far ÷ ${h.ly_year} by this point">Pace</th>`
+      +`<th data-tip="${h.ly_year}'s final × pace, blended toward last year until sales build">Expected final</th><th data-tip="Expected final ÷ ${seats} per bus, rounded up">Needed</th>`
       +`<th data-tip="Needed minus scheduled">Buses to add</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }).join('');
 
