@@ -7255,7 +7255,8 @@ function hpStopsTip(ev,key){
   tip.classList.add('hp-wide');
   // More than 12 trips: two columns, so a 31-trip day fits on screen (tooltips cannot scroll).
   tip.innerHTML=`<div class="od-head">${_hpEsc(s.title)} · ${n} trip${n===1?'':'s'} by departure</div>`
-    +`<div class="${n>12?'hp-cols':''}">`
+    // Fill DOWN the left column then the right, so departures read top-to-bottom, not zig-zag.
+    +(n>12?`<div class="hp-cols" style="grid-auto-flow:column;grid-template-rows:repeat(${Math.ceil(n/2)},auto)">`:'<div>')
     +s.list.map(x=>{
       const stops=x.stops||[];
       const route=_hpEsc(stops.join(' → '))+(stops.length<=2?' · direct':'');
