@@ -218,7 +218,7 @@ table.pivot th.s1{z-index:25;} table.pivot th.s2{z-index:25;} table.pivot th.s3{
 table.dt th.hp-grp{text-align:center;color:var(--text2);border-bottom:1px solid var(--border);}
 #panel-holiday table.dt td{white-space:nowrap;}
 #od-tip.hp-wide{max-width:700px;}
-#panel-holiday td.hp-hov{cursor:help;text-decoration:underline dotted;text-decoration-color:var(--border2);text-underline-offset:3px;}
+#panel-holiday td.hp-hov{cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--border2);text-underline-offset:3px;}
 #od-tip .hp-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:20px;}
 #od-tip .hp-trip{padding:4px 0;border-bottom:1px solid var(--border);}
 #od-tip .hp-trip:last-child{border-bottom:none;}
@@ -4362,7 +4362,7 @@ function renderMomentumPace(){
     var r=x.r, m=x.m, sg=_momSignal(m);
     var tipKey='m'+ri; __momTipRows[tipKey]=x;
     var tipAttr=' onmouseenter="momExpTip(event,\''+tipKey+'\')" onmouseleave="hideODTip()"'
-      +' style="cursor:help;';
+      +' style="cursor:default;';
     var dep=new Date(x.iso+'T00:00:00');
     // Cap the printed pace. Past a few hundred percent the figure is dominated by how
     // small the baseline was, not by how well the trip is selling, and a precise-looking
@@ -6867,7 +6867,7 @@ function renderSuggestionsTable(rows){
     let scoreCell='';
     if(scoringEngine==='beta'){
       const scoreStr=(effScore>=0?'+':'')+effScore.toFixed(2);
-      scoreCell='<td style="text-align:center;vertical-align:top;color:'+scoreCol+';font-weight:700;font-family:\'JetBrains Mono\',monospace;cursor:help"'
+      scoreCell='<td style="text-align:center;vertical-align:top;color:'+scoreCol+';font-weight:700;font-family:\'JetBrains Mono\',monospace;cursor:default"'
         +' onmouseenter="showSugScoreTip(event,\''+rowKey+'\')" onmousemove="_sugTipMove(event)" onmouseleave="_sugTipHide()">'+scoreStr+'</td>';
     }
     // Confidence cell — hover reveals derivation (Beta only; Current keeps simpler heuristic)
@@ -7401,9 +7401,9 @@ function renderHoliday(){
       __hpStops[kT]={side:'ty',title:'This year · '+_hpDay(r.date),list:T.trip_list};
       return `<tr>`
         +`<td style="font-weight:700">${_hpDay(r.date)}<div style="font-size:10px;color:var(--text3);font-weight:400">last yr ${_hpDay(L.date)}</div></td>`
-        +`<td style="cursor:help" onmouseenter="hpStopsTip(event,'${kL}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()">${L.trips}</td>`
+        +`<td style="cursor:default" onmouseenter="hpStopsTip(event,'${kL}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()">${L.trips}</td>`
         +`<td>${L.buses}</td><td>${_hpN(L.people)}</td><td>${L.buses_needed}</td>${_hpLoad(L.load_pct)}`
-        +`<td style="cursor:help" onmouseenter="hpStopsTip(event,'${kT}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()">${T.trips}`
+        +`<td style="cursor:default" onmouseenter="hpStopsTip(event,'${kT}')" onmousemove="posODTip(event)" onmouseleave="hideODTip()">${T.trips}`
         +(T.shut_off?`<div style="font-size:10px;color:var(--bad)">${T.shut_off} shut off</div>`:'')+`</td>`
         +`<td>${T.buses}</td><td>${_hpN(T.sold)}</td><td>${_hpN(L.at_same_point)}</td><td>${T.pace_pct==null?'—':T.pace_pct+'%'}</td>`
         +`<td>${_hpN(T.projected)}</td><td>${T.buses_needed==null?'—':T.buses_needed}</td>${_hpGap(T.gap)}</tr>`;
@@ -8027,8 +8027,8 @@ function renderFleet(){
   const utilPct=F.total?Math.round(100*F.utilized/F.total):0;
 
   // ── Hero KPIs — the four fleet metrics (available-not-utilized featured) ──
-  const kpi=(label,val,cls,note,key)=>`<div class="mkpi" style="cursor:help" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label">${label}</div><div class="mkpi-val ${cls||''}">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
-  const featured=(label,val,note,key)=>`<div class="mkpi" style="cursor:help;border:1px solid var(--cream);border-radius:8px;background:rgba(212,196,168,.06)" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label" style="color:var(--cream)">${label}</div><div class="mkpi-val cream">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
+  const kpi=(label,val,cls,note,key)=>`<div class="mkpi" style="cursor:default" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label">${label}</div><div class="mkpi-val ${cls||''}">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
+  const featured=(label,val,note,key)=>`<div class="mkpi" style="cursor:default;border:1px solid var(--cream);border-radius:8px;background:rgba(212,196,168,.06)" onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"><div class="mkpi-label" style="color:var(--cream)">${label}</div><div class="mkpi-val cream">${val}</div>${note?`<div class="mkpi-note">${note}</div>`:''}</div>`;
   const dormN=(loadFu().dormant_buses||[]).length;
   document.getElementById('fuKpis').innerHTML=
     kpi('Total Fleet',F.total,'',(dormN?dormN+' dormant excluded':'active GPS coaches'),'total')+
@@ -8064,7 +8064,7 @@ function renderFuDivTable(C, d){
       const tdr=td+';text-align:right;font-family:\'JetBrains Mono\',monospace';
       return `<tr><td style="${td}"><strong>${div}</strong>${small}</td><td style="${tdr}">${m.total}</td><td style="${tdr}">${oosCell}</td><td style="${tdr}">${m.utilized}</td><td style="${tdr}">${anu}</td><td style="${tdr}">${Math.round(m.mpbd).toLocaleString()}</td><td style="${td};width:150px">${idxBar(m.idxT)}</td><td style="${td};text-align:center">${vBadge(m.verdict)}</td></tr>`;
     }).join('');
-  const th=(t,al,key)=>`<th${key?` onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"`:''} style="cursor:${key?'help':'default'};padding:8px 10px;text-align:${al};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${t}</th>`;
+  const th=(t,al,key)=>`<th${key?` onmouseenter="fuTip(event,'${key}')" onmouseleave="hideODTip()"`:''} style="cursor:default;padding:8px 10px;text-align:${al};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)">${t}</th>`;
   document.getElementById('fuDivTable').innerHTML=`<thead><tr style="background:var(--surface);border-bottom:1px solid var(--border2)">${th('Division','left')}${th('Total','right','c_total')}${th('O/S','right','c_oos')}${th('Utilized','right','c_util')}${th('Avail&middot;Idle','right','c_anu')}${th('mi/Bus&middot;Day','right','c_mpbd')}${th('Index','left','c_index')}${th('Verdict','center','c_verdict')}</tr></thead><tbody>${rows}</tbody>`;
 }
 
@@ -8540,7 +8540,7 @@ function renderFuHeatmap(){
     const col=_fuHmColor(metric,cell.avg,maxAvg,usage,cell.occ);
     const disp = !cell.occ ? '&middot;' : metric==='usage' ? (usage+'%') : (cell.avg>0?Math.round(cell.avg):'&middot;');
     const safe=String(label).replace(/'/g,"\\'");
-    return `<td onmouseenter="fuHmTip(event,'${safe}','${dowLab[cell.dw]}',${cell.avg.toFixed(1)},${cell.tot.toFixed(0)},${cell.run},${cell.occ},${isDiv?'true':'false'})" onmouseleave="hideODTip()" style="text-align:center;padding:5px 4px;border-bottom:1px solid var(--border);background:${col.bg};color:${col.fg};font-family:'JetBrains Mono',monospace;cursor:help">${disp}</td>`;
+    return `<td onmouseenter="fuHmTip(event,'${safe}','${dowLab[cell.dw]}',${cell.avg.toFixed(1)},${cell.tot.toFixed(0)},${cell.run},${cell.occ},${isDiv?'true':'false'})" onmouseleave="hideODTip()" style="text-align:center;padding:5px 4px;border-bottom:1px solid var(--border);background:${col.bg};color:${col.fg};font-family:'JetBrains Mono',monospace;cursor:default">${disp}</td>`;
   };
 
   const body=displayRows.map(r=>{
