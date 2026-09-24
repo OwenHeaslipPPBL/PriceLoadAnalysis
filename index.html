@@ -5242,8 +5242,15 @@ function mktAdj(od,depISO,daysOut,pax){
   }
   return null;
 }
-// Business rounding: MMC rounds the adjusted fare UP to the increment (verified on the $22.99 case).
-function mktRound(v){ if(v==null||!isFinite(v)) return null; return Math.max(0,Math.ceil(v-0.99))+0.99; }
+// Business rounding: MMC rounds the adjusted fare to the NEAREST $0.99 increment, NOT up.
+// WRONG UNTIL 2026-09-24. It was 'verified' on the 8754P case ($24.99 x 0.90 -> $22.99) -- where round-up
+// and round-nearest give the SAME answer, so that case could not distinguish them and proved nothing.
+// Cases where they differ, all read live from the booking site on 2026-09-24:
+//    49.99 x -10% = 44.991 -> MMC $44.99 (round-up would give $45.99)
+//    49.99 x +15% = 57.488 -> MMC $56.99 (round-up would give $57.99)
+//    39.99 x -10% = 35.991 -> MMC $35.99 (round-up would give $36.99)
+// Before changing this again, test against a case where the two rules DISAGREE.
+function mktRound(v){ if(v==null||!isFinite(v)) return null; return Math.max(0,Math.round(v-0.99))+0.99; }
 // What the customer would pay for a proposed price on this row.
 function mktEffective(r,price){
   if(price==null) return null;
