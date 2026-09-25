@@ -6285,22 +6285,58 @@ function _v4Confidence(r){
 // direct Flix departure from any NYC stop in the same hour (Owen 2026-08-06).
 // Falls back to PABT when there is no alt-stop data for that slot.
 // Since 2026-09-21 the cheaper of that and OurBus (r.compRef).
+// ⭐ 2026-09-25 (Owen): do NOT double-count a factor MMC's ladder already acts on.
+// MMC re-prices continuously on LOAD x DAYS-OUT x WEEKDAY; it cannot see competitors. So on a
+// market that has a live rule the division of labour is: MMC owns the within-trip dynamics, the
+// dashboard owns where the BASE sits versus the market. Raising here because a bus is filling and
+// then letting the ladder raise it again for the same reason is one signal charged for twice --
+// three times in fact, since load also sat inside the composite score.
+// Unlike mktAdj this ignores pax/days-out bands: we only ask whether a rule GOVERNS the trip, so
+// an unknown ticket count cannot make a ruled trip look unruled.
+function mktRuled(od,depISO,sched){
+  if(!od||!depISO) return false;
+  var idx=mktRules(), mks=idx.od[od]||[], todayISO=(new Date()).toISOString().slice(0,10);
+  for(var i=0;i<mks.length;i++){
+    var rules=idx.markets[mks[i]]||[];
+    for(var j=0;j<rules.length;j++){
+      var R=rules[j];
+      if(R.ts&&depISO<R.ts) continue;
+      if(R.te&&depISO>R.te) continue;
+      if(R.qs&&todayISO<R.qs) continue;
+      if(R.qe&&todayISO>R.qe) continue;
+      if(R.ft&&!/advanced/i.test(R.ft)&&!/ADVANCED_FARE/.test(R.ft)) continue;
+      if(R.scUnknown) continue;
+      if(R.scList&&R.scList.length){ if(!sched||R.scList.indexOf(String(sched).trim())<0) continue; }
+      return true;
+    }
+  }
+  return false;
+}
 function _v4Flix(r){ return (r.compRef!==undefined ? r.compRef : (r.flixRef!=null?r.flixRef:r.flixFare)); }
 function computeV4(r){
   const L=_v4LoadScore(r), G=_v4GapScore(r), P=_v4PaceScore(r), F=_v4FlixSeatsScore(r);
   let score,action='Hold',target=r.fare,scoreSource;
   const FX=_v4Flix(r);
+  const RULED=mktRuled(r.od,r.dateISO,r.schedule);   // MMC already yield-manages this trip
   if(FX!==null){
-    score=0.25*L+0.25*G+0.25*P+0.25*F;
-    scoreSource='full';
-    // Balanced tune 2026-05-29 — thresholds centralized in the V4_* config block (2026-07-07)
-    if(score>V4_RAISE_SCORE||_v4LoadFor(r)>V4_RAISE_LOAD){   // raise on a real signal OR a near-full bus
+    // On a RULED market drop Load from the composite and drop the standalone near-full trigger:
+    // both are the ladder's job. What is left is what MMC cannot see -- the competitor position.
+    // r.fare is the POST-adjustment quoted price, so if the ladder over- or under-adjusts it shows
+    // up here as a gap and gets corrected through the base. That is the feedback loop.
+    score = RULED ? (G+P+F)/3 : 0.25*L+0.25*G+0.25*P+0.25*F;
+    scoreSource = RULED ? 'ruled' : 'full';
+    const nearFull = !RULED && _v4LoadFor(r)>V4_RAISE_LOAD;
+    if(score>V4_RAISE_SCORE||nearFull){
       action='Raise';
       target=priceTarget(r.fare+0.5*Math.max(0,FX-r.fare));
       if(target<=r.fare)target=priceTarget(r.fare+1);
-    } else if(score<V4_LOWER_SCORE&&r.gapPct>V4_LOWER_GAP_PCT&&_v4LoadFor(r)<V4_LOWER_LOAD){   // lower only when clearly over Flix AND fairly empty
+    } else if(score<V4_LOWER_SCORE&&r.gapPct>V4_LOWER_GAP_PCT&&(RULED||_v4LoadFor(r)<V4_LOWER_LOAD)){
+      // the "fairly empty" condition is also a load test, so on a ruled market the gap alone decides
       action='Lower';target=priceTarget(FX*0.97);
     }
+  } else if(RULED){
+    // Ruled market and no competitor reading: we have nothing MMC does not already have. Hold.
+    score=0; scoreSource='ruled-nocomp';
   } else {
     score=0.5*L+0.5*P;
     scoreSource='nocomp';
