@@ -998,6 +998,7 @@ body{
           <div class="ov-panel-head">
             <span class="ov-panel-title ov-sold-title">Sold Out / Full Buses</span>
             <span class="ov-cnt" id="ovSoldCnt">0</span>
+            <span id="ovZeroCap" style="margin-left:8px;font-size:11px;font-weight:500;color:var(--text3)"></span>
           </div>
           <table class="dt"><thead><tr>
             <th>Route</th><th>Date</th><th>Time</th><th>Sched #</th><th>Tix</th><th>Status</th>
@@ -3251,6 +3252,20 @@ function renderOverview(){
   });
   const handled=soldRaw.filter(r=>!needsAction.includes(r));
   document.getElementById('ovSoldCnt').textContent=needsAction.length+' / '+soldRaw.length;
+  // Trips DCC reports at ZERO committed seats — dispatch shut sales off, or TDS is
+  // sending a bad 0 on a live trip (both seen 2026-09-28). tripStatus no longer calls
+  // them sold out, so they correctly leave this list. But they must not disappear
+  // SILENTLY: a zero-capacity trip that should be selling is its own problem, and this
+  // is the only surface where it would ever show. Stated quietly beside the count —
+  // same idiom as the cancel list's "N already cancelled in dispatch, hidden".
+  const _zcEl=document.getElementById('ovZeroCap');
+  if(_zcEl){
+    const _zc=snapData.filter(r=>{
+      const o=opsLookup[(r.sched||'').toString().trim()+'|'+capISO(r.depDate)];
+      return o && o.seats===0;
+    }).length;
+    _zcEl.textContent=_zc?('· '+_zc+' with 0 capacity in dispatch'):'';
+  }
   let soldHtml='';
   if(needsAction.length){
     soldHtml+='<tr class="ov-subhead"><td colspan="6">&#9888; Needs a decision — single bus at capacity (raise / add bus)</td></tr>'
@@ -5691,8 +5706,19 @@ function tripStatus(tix, schedule, dateISO){
     doubled = busCount > 1;
     // Sold out: peak occupancy hit the bus capacity. Falls back to tix>=54 if
     // either field is missing.
+    // seats === 0 means dispatch has ZEROED capacity — sales shut off, or (2026-09-28,
+    // confirmed by Owen with TDS) an upstream TDS fault reporting 0 on a live trip.
+    // The test used to be a bare `max >= seats`, so a zeroed trip evaluated 0 >= 0 ===
+    // true and rendered "Sold Out" with 0 passengers. busesFor(0) is 1, so it then landed
+    // on the Overview's "Needs a decision — single bus at capacity (raise / add bus)"
+    // list, asking for a SECOND bus on a trip that is not selling at all.
+    // NB the busCount branch 5 lines above ALREADY guarded `ops.seats <= 0` — the zero
+    // case was known and hardened there, and this branch never got the same guard. It is
+    // the only capacity comparison here that does not use the `|| fallback` idiom, which
+    // is exactly why it was the only one a bad zero could corrupt.
+    // These trips are NOT silently dropped: renderOverview counts them and says so.
     if(ops.max != null && ops.seats != null){
-      soldOut = ops.max >= ops.seats;
+      soldOut = ops.seats > 0 && ops.max >= ops.seats;
     } else {
       soldOut = (tix||0) >= SOLDOUT_CAP;
     }
