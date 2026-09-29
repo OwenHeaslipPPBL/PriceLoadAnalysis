@@ -8158,6 +8158,73 @@ function _hpGapHov(key,html,g,cls,chip){
   return _hpHov(key,html,cls,st)+txt+(chip||'')+'</td>';
 }
 
+// ── Buses to add: sparkline + morning/afternoon/night split (Owen 2026-09-29) ──────────────────
+// "busses to add needs to be transferred into a sparkline ... show the 5 day pace that we see in the
+// tool tip and only have the ... most recent number on the end ... inside that tool tip ... the
+// busses to add number broken up into morning, afternoon, night ... within the specific day."
+// Parts of the day: morning 5:00-11:59, afternoon 12:00-16:59, night 17:00-4:59 (overnights = night).
+const HP_BANDS=['Morning','Afternoon','Night'];
+function _hpBand(m){if(m==null)return null;m=((m%1440)+1440)%1440;return m<300?'Night':m<720?'Morning':m<1020?'Afternoon':'Night';}
+// The day's buses NEEDED is split across the three parts by WHEN last year's riders travelled,
+// largest-remainder, so the parts always add back to the day's number exactly. SCHEDULED per part is
+// dispatch's own trip list. To add = needed - scheduled per part, so the parts sum to the day figure.
+// Falls back to this year's sales mix, then the schedule's mix, when last year has nothing to go on.
+function _hpBands(r){
+  const T=r.ty||{},L=r.ly||{},need=T.buses_needed,z=()=>({Morning:0,Afternoon:0,Night:0});
+  const mix=z(),sched=z();let unk=0,src="last year's riders";
+  (L.trip_list||[]).forEach(x=>{const b=_hpBand(x.m);if(b)mix[b]+=x.people||0;});
+  let tot=mix.Morning+mix.Afternoon+mix.Night;
+  if(!tot){(T.trip_list||[]).forEach(x=>{const b=_hpBand(x.m);if(b&&!x.off)mix[b]+=x.sold||0;});
+           tot=mix.Morning+mix.Afternoon+mix.Night;src="this year's sales";}
+  (T.trip_list||[]).forEach(x=>{if(x.off)return;const b=_hpBand(x.m);if(b)sched[b]+=x.buses||0;else unk+=x.buses||0;});
+  if(!tot){HP_BANDS.forEach(b=>mix[b]=sched[b]);tot=mix.Morning+mix.Afternoon+mix.Night;src='the current schedule';}
+  if(need==null||!tot)return null;
+  const q=HP_BANDS.map(b=>need*mix[b]/tot),fl=q.map(Math.floor);
+  let left=need-fl.reduce((a,c)=>a+c,0);
+  q.map((v,i)=>[v-fl[i],i]).sort((a,b)=>b[0]-a[0]).forEach(([,i])=>{if(left>0){fl[i]++;left--;}});
+  return {src,unk,rows:HP_BANDS.map((b,i)=>({b,need:fl[i],sched:sched[b],add:fl[i]-sched[b]}))};
+}
+// Needed minus scheduled for each morning in view.trend_dates -- SIGNED, so a day that has turned
+// into a surplus shows it (the older "add" trend clamps at 0 for the summary sums).
+function _hpGapSeries(r){
+  const tr=r.ty&&r.ty.trend,out=[];if(!tr)return out;
+  for(let i=0;i<__hpTD.length;i++){const n=tr.need[i],s=tr.sched[i];if(n!=null&&s!=null)out.push({d:__hpTD[i],v:n-s});}
+  return out;
+}
+// Tiny line of the series. Each row is centred on its own values but every row in a table shares
+// one vertical SPAN, so a steep line really is a bigger swing than a gentle one next to it.
+// Red = gap growing (more buses needed), green = closing -- same convention as the tooltip arrows.
+function _hpSpark(pts,span){
+  if(pts.length<2)return '';
+  const W=64,H=18,P=2,vs=pts.map(p=>p.v),mid=(Math.max(...vs)+Math.min(...vs))/2,half=Math.max(span,1)/2;
+  const x=i=>P+i*(W-2*P)/(vs.length-1),y=v=>H/2-(v-mid)/half*(H/2-P);
+  const d=vs[vs.length-1]-vs[0],col=d>0?'var(--bad)':d<0?'var(--good)':'var(--text3)';
+  const path=vs.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');
+  return `<svg class="hp-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="vertical-align:middle;overflow:visible">`
+    +`<path d="${path}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>`
+    +`<circle cx="${x(vs.length-1).toFixed(1)}" cy="${y(vs[vs.length-1]).toFixed(1)}" r="2.2" fill="${col}"/></svg>`;
+}
+function _hpAddCell(key,hd,r,cls,span){
+  const T=r.ty||{},g=T.gap,pts=_hpGapSeries(r),bd=_hpBands(r);
+  const fmt=v=>v>0?'+'+v:v<0?'&minus;'+(-v):'0';
+  const cOf=v=>v==null?'var(--text3)':v>0?'var(--bad)':v<0?'var(--text3)':'var(--good)';
+  let tip=`<div class="od-head">${hd} · buses to add</div>`;
+  if(bd){
+    bd.rows.forEach(x=>{tip+=`<div class="od-row hp-band"><span class="od-seg">${x.b}</span><span class="od-cnt">`
+      +`<b style="color:${cOf(x.add)}">${fmt(x.add)}</b> <span style="color:var(--text3);font-weight:400;margin-left:6px">needs ${x.need} · has ${x.sched}</span></span></div>`;});
+    tip+=`<div class="od-row" style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px"><span class="od-seg"><b>Whole day</b></span>`
+      +`<span class="od-cnt"><b style="color:${cOf(g)}">${g==null?'—':fmt(g)}</b> <span style="color:var(--text3);font-weight:400;margin-left:6px">needs ${T.buses_needed} · has ${T.buses}</span></span></div>`
+      +`<div style="margin-top:6px;color:var(--text3);font-size:11px">Morning 5am–noon · afternoon noon–5pm · night 5pm–5am. The day's buses needed is split by when ${bd.src} travelled; "has" is what dispatch has scheduled in that part of the day.</div>`;
+    if(bd.unk)tip+=`<div style="color:var(--warn);font-size:11px">${bd.unk} scheduled bus(es) have no departure time, so they sit in no part of the day.</div>`;
+  }else tip+=`<div style="color:var(--text3)">No morning / afternoon / night split yet — nothing to go on for this day.</div>`;
+  if(pts.length>=2){const d=pts[pts.length-1].v-pts[0].v;
+    tip+=`<div style="margin-top:6px;color:var(--text3)">Last ${pts.length} days: <span style="font-family:monospace;color:var(--text2)">${pts.map(p=>fmt(p.v)).join(' &rarr; ')}</span> `
+      +`<span style="color:${d>0?'var(--bad)':d<0?'var(--good)':'var(--text3)'};font-weight:700;font-size:13px">${d>0?'&uarr;':d<0?'&darr;':'&mdash;'}</span></div>`;}
+  return _hpHov(key,tip,cls,'white-space:nowrap')
+    +`<span style="display:inline-flex;align-items:center;gap:6px">${_hpSpark(pts,span)}`
+    +`<span class="hp-add-now" style="color:${cOf(g)};font-weight:${g>0?800:700}">${g==null?'—':fmt(g)}</span></span></td>`;
+}
+
 function hpCurve(c,dOut){
   const ly=c.curve.ly||{},ty=c.curve.ty||{};
   const keys=Object.keys(ly).map(Number);
@@ -8249,7 +8316,7 @@ function renderHoliday(){
       ?`<div><b>Extra buses</b> = buses that went beyond what that day's riders needed, added up by day. <b>Load</b> = people ÷ (buses that went × seats); short trips between stops count as people too, so a busy multi-stop route can read above 100%.</div>`
       :`<div><b>This year's schedule</b> is dispatch's current plan. Set-ins and doubles usually appear closer to the date, so "Buses to add" shrinks as they are added.</div>`
        +`<div><b>Expected</b> = last year's final × this year's pace. Pace is blended toward last year until sales build, so a few early tickets cannot swing it. Last year's early counts leave out tickets later cancelled, so pace reads a little high early on. Both years count complete days only (sales through yesterday).</div>`
-       +`<div><b>Last 4 days</b>: hover Expected final or Buses to add to see how it has moved, the same as the projection on the Loads tab. Buses to add shows once two mornings of dispatch's schedule have been saved (saved daily from Sep 16, 2026).</div>`)
+       +`<div><b>Last 5 days</b>: hover Expected final to see how it has moved. In the day tables, Buses to add is a small line of the last 5 mornings (red = the gap is growing, green = closing) ending in today's number; hover it for the morning / afternoon / night split.</div>`)
     +`<div style="color:var(--text3);margin-top:6px">Holidays carried: the next three upcoming and the most recent one. Monday holidays run Thursday–Tuesday, Thanksgiving Tuesday–Monday, Easter Thursday–Monday, Christmas & New Year Dec 23 – Jan 4. Juneteenth, July 4 and Veterans Day count every year: Thursday–Monday on a Friday, Thursday–Tuesday on a Monday, the Saturday before through the Sunday after midweek, stretched when needed to cover last year's travel days too. Refreshed every morning.</div></div></div>`;
 }
 
@@ -8351,6 +8418,8 @@ function _hpRenderPlanner(h,secs,cur){
 
   det.innerHTML=h.corridors.map((c,ci)=>({c,ci})).filter(o=>o.c.corridor===cur).map(({c,ci})=>{
     const seats=(c.days[0]&&c.days[0].ly.seats_per_bus)||54;
+    // one vertical span for every sparkline in this table (min 4 buses, so a 1-bus wiggle stays flat)
+    const span=Math.max(4,...c.days.map(r=>{const v=_hpGapSeries(r).map(p=>p.v);return v.length?Math.max(...v)-Math.min(...v):0;}));
     const rows=c.days.map((r,i)=>{
       const L=r.ly,T=r.ty,kL=ci+'|'+i+'|ly',kT=ci+'|'+i+'|ty';
       __hpStops[kL]={side:'ly',title:`${lyY} · `+_hpDay(L.date),list:L.trip_list};
@@ -8362,10 +8431,10 @@ function _hpRenderPlanner(h,secs,cur){
         +_hpTripCell(kT,T.trips,TY1,T.shut_off?`<div style="font-size:10px;color:var(--bad)">${T.shut_off} shut off</div>`:'')
         +`<td class="${TY}">${T.buses}</td><td class="${TY}">${_hpN(T.sold)}</td><td class="${TY}">${_hpN(L.at_same_point)}</td><td class="${TY}">${T.pace_pct==null?'—':T.pace_pct+'%'}</td>`
         +(()=>{const s1=_hpTrend([r]), hd=`${_hpEsc(c.direction)} · ${_hpDay(r.date)}`,
-                    le=_hpTrendLine(s1,'exp'), la=_hpTrendLine(s1,'add');
+                    le=_hpTrendLine(s1,'exp');
           return (le?_hpHov(`d${ci}|${i}|exp`,`<div class="od-head">${hd} · expected final</div>`+le,TY):`<td class="${TY}">`)+`${_hpN(T.projected)}</td>`
             +`<td class="${TY}">${T.buses_needed==null?'—':T.buses_needed}</td>`
-            +(la?_hpGapHov(`d${ci}|${i}|add`,`<div class="od-head">${hd} · buses to add</div>`+la,T.gap,TY):_hpGap(T.gap,TY));})()+`</tr>`;
+            +_hpAddCell(`d${ci}|${i}|add`,hd,r,TY,span);})()+`</tr>`;
     }).join('');
     return `<div class="ov-panel" style="margin-bottom:18px">`
       +`<div class="ov-panel-head"><div class="ov-panel-title">${_hpEsc(c.direction)}</div><span style="font-size:10px;color:var(--text3)">${seats} seats per bus</span></div>`
