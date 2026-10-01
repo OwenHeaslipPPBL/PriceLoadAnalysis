@@ -236,6 +236,16 @@ table.dt th.hp-grp{text-align:center;color:var(--text2);border-bottom:1px solid 
 #panel-holiday table.dt .hp-sep{border-left:2px solid var(--border2);}
 #panel-holiday table.dt tr.hp-total td{font-weight:800;background:var(--surface2);border-top:2px solid var(--border2);}
 #panel-holiday table.dt tr.hp-total td.hp-ty{background:rgba(6,136,60,.12);}
+/* Holiday Planner summary: frozen header rows + route column (Owen 2026-10-01). The table scrolls inside
+   its own box: it is wider than the panel on a laptop, and a box that scrolls sideways cannot also pin
+   its header to the page. --hp-h1 = the first header row's height, set by hpFreezeSummary(). */
+#hpSumPanel .table-wrap{max-height:calc(100vh - 170px);overflow:auto;}
+#panel-holiday #hpSummary thead th{position:sticky;top:0;z-index:3;background:var(--surface2);}
+#panel-holiday #hpSummary thead tr+tr th{top:var(--hp-h1,30px);}
+#panel-holiday #hpSummary thead th.hp-ty{background:linear-gradient(rgba(6,136,60,.06),rgba(6,136,60,.06)),var(--surface2);}
+#hpSummary .hp-frz{position:sticky;left:0;z-index:2;background:var(--surface);box-shadow:inset -2px 0 0 var(--border2);}
+#panel-holiday #hpSummary thead th.hp-frz{z-index:4;background:var(--surface2);}
+#hpSummary tr.hp-total td.hp-frz{background:var(--surface2);}
 /* Trips tooltip: up to 3 columns; click pins it so it can be scrolled */
 #od-tip.hp-wide{max-width:min(700px,calc(100vw - 16px));}
 #od-tip.hp-xwide{max-width:min(980px,calc(100vw - 16px));}
@@ -8360,6 +8370,14 @@ function hpSetView(i){__hpView=i;renderHoliday();}
 
 // The holiday buttons top left (Owen 2026-09-16), then company-wide numbers, then the summary of every
 // route, then the route picker directly above the charts it controls.
+// Holiday summary: freeze the two header rows and the route column (Owen 2026-10-01). The CSS does the
+// pinning; this marks the route cells and measures the first header row so the second sits right under it.
+function hpFreezeSummary(){
+  var t=document.getElementById('hpSummary');if(!t||!t.tHead||!t.tHead.rows.length)return;
+  var c0=t.tHead.rows[0].cells[0];if(c0)c0.classList.add('hp-frz');
+  [].slice.call(t.querySelectorAll('tbody tr, tfoot tr')).forEach(function(tr){var c=tr.cells[0];if(c&&c.colSpan===1)c.classList.add('hp-frz');});
+  requestAnimationFrame(function(){var h=t.tHead.rows[0].offsetHeight;if(h>0)t.style.setProperty('--hp-h1',h+'px');});
+}
 function renderHoliday(){
   const kp=document.getElementById('hpKpis'),sum=document.getElementById('hpSummary'),det=document.getElementById('hpDetail'),
         notes=document.getElementById('hpNotes'),asof=document.getElementById('hpAsOf'),tg=document.getElementById('hpViewToggle'),
@@ -8400,6 +8418,7 @@ function renderHoliday(){
   const cur=(sel&&sel.value)||__hpCors[0];
   __hpBreak={};__hpStops={};
   if(v.mode==='recap')_hpRenderRecap(v,secs,cur);else _hpRenderPlanner(v,secs,cur);
+  hpFreezeSummary();
 
   const bySec=secs.map(([s,cs])=>[s,cs.reduce((a,c)=>a+_hpSum(c.days,'ly','people'),0),cs.reduce((a,c)=>a+(v.mode==='recap'?_hpSum(c.days,'ty','people'):_hpSum(c.days,'ty','sold')),0),new Set(cs.map(c=>c.corridor)).size]);
   const secLine=bySec.map(([s,l,t,n])=>`${n} ${n===1?s.toLowerCase().replace(/s$/,''):s.toLowerCase()} (${_hpN(l)} people in ${v.ly_year})`).join(', ');
