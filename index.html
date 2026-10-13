@@ -7230,6 +7230,18 @@ function sugLayersMismatch(r){
     return (typeof m==='number'&&typeof f==='number'&&Math.abs(m-f)>0.5)?{model:m,live:f}:null;
   }catch(e){return null;}
 }
+// Saturday-morning guard (Owen with Colm + Tim, 2026-10-13): DC to NYC and Providence to NYC departures on a
+// Saturday morning fill up week after week (Aug-Oct: the 4:20 / 5:20 / 6:10 AM DC buses and the 6:30 / 8:30 AM
+// Providence buses ran full or doubled most Saturdays), so the model never CUTS them; raises still go through.
+// The cheaper competitor in the same hour is what triggers those cuts, and those buses fill anyway.
+// Kill switch: window.__sugSatAmGuard=false.
+var __sugSatAmGuard=true;
+function sugSatMorning(r){
+  if(!__sugSatAmGuard||!r||r.direction!=='Return'||(r.corridor!=='DC'&&r.corridor!=='Providence'))return false;
+  if(!r.dateISO||r.depMins==null)return false;
+  const d=new Date(r.dateISO+'T12:00:00');
+  return d.getDay()===6&&r.depMins>=240&&r.depMins<720;
+}
 function computeV4(r){
   const L=_v4LoadScore(r), G=_v4GapScore(r), P=_v4PaceScore(r), F=_v4FlixSeatsScore(r);
   let score,action='Hold',target=r.fare,scoreSource;
@@ -7267,6 +7279,8 @@ function computeV4(r){
   if(_noPax&&action!=='Hold'){action='Hold';target=r.fare;}
   const _mm=sugLayersMismatch(r);let mmHold=false;
   if(_mm&&action!=='Hold'){action='Hold';target=r.fare;mmHold=true;}
+  let satHold=false;
+  if(action==='Lower'&&sugSatMorning(r)){action='Hold';target=r.fare;satHold=true;}
   // ⚠️ Everything above computes what the CUSTOMER should pay: r.fare is the quoted fare and the
   // competitor reference is a quoted fare too. So the guardrails belong here, on the customer
   // price — applying them to the base let a +30% market rule turn a capped +50% raise into ~+95%
@@ -7332,6 +7346,8 @@ function computeV4(r){
   } else if(mmHold){
     reason='MMC is not pricing this trip the way its ladder says: it sells at $'+_mm.live.toFixed(2)+' where the ladder gives $'+_mm.model.toFixed(2)
           +' (often a double bus, where MMC seems to count each bus). A change here could land somewhere else, so hold at '+fMoney(r.fare)+' and check the trip in Price Layers.';
+  } else if(satHold){
+    reason='Saturday-morning '+(r.corridor==='DC'?'DC':'Providence')+' to NYC trip ('+_lp+'% full): these fill up most Saturdays, so no cut (Owen, Colm and Tim, 10/13) — hold at '+fMoney(r.fare)+'.';
   } else if(milNoop){
     reason='Customers already pay the mileage fare ('+fMoney(MIL)+'): MMC charges the cheaper of the Advanced Purchase fare and the mileage fare, so a raise would not be charged — hold at '+fMoney(r.fare)+'.';
   } else if(_noPax){
