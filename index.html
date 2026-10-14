@@ -9428,6 +9428,12 @@ function _hpRenderRecap(h,secs,cur){
     return t;
   };
   const load=(p,cap)=>cap?Math.round(100*p/cap):null;
+  // Revenue + average fare (Owen 2026-10-14: the results view had no revenue metrics). Revenue = every ticket on the
+  // direction's trips, short segments included; average fare = revenue / people who traveled, both years alike.
+  const avgOf=(R,P)=>(P&&R!=null)?R/P:null;
+  const _m2=v=>(v==null||!isFinite(v))?'—':'$'+v.toFixed(2);
+  const chgA=(a,b)=>(a==null||b==null)?'—':chg(a,b);
+  const chgColA=(a,b)=>(a==null||b==null)?'var(--text3)':chgCol(a,b);
   const tots=new Map(h.corridors.map(c=>[c,tot(c)]));
   const A={}, secTot={};
   const add=(a,t)=>{KEYS.forEach(k=>a[k]=(a[k]||0)+t[k]);return a;};
@@ -9439,11 +9445,19 @@ function _hpRenderRecap(h,secs,cur){
     mkpi('Needed at full capacity',_hpN(A.tyN),'yellow',`vs ${_hpN(A.lyN)} in ${lyY}`)+
     mkpi('Extra buses run',_hpN(A.tyX),A.tyX>A.lyX?'red':'green',`beyond what riders needed · ${_hpN(A.lyX)} in ${lyY}`)+
     mkpi('Load',tyLoad==null?'—':tyLoad+'%',tyLoad!=null&&tyLoad>=80?'green':'',`vs ${lyLoad==null?'—':lyLoad+'%'} in ${lyY}`)+
-    mkpi('Revenue','$'+_hpN(A.tyR),'green',`vs $${_hpN(A.lyR)} in ${lyY} (${chg(A.tyR,A.lyR)})`);
+    mkpi('Revenue','$'+_hpN(A.tyR),'green',`vs $${_hpN(A.lyR)} in ${lyY} (${chg(A.tyR,A.lyR)})`)+
+    mkpi('Avg fare',_m2(avgOf(A.tyR,A.tyP)),'',`vs ${_m2(avgOf(A.lyR,A.lyP))} in ${lyY} (${chgA(avgOf(A.tyR,A.tyP),avgOf(A.lyR,A.lyP))}) · revenue ÷ people`)+
+    mkpi('Revenue per bus',_hpMoney(avgOf(A.tyR,A.tyB)),(avgOf(A.tyR,A.tyB)||0)>=(avgOf(A.lyR,A.lyB)||0)?'green':'red',`vs ${_hpMoney(avgOf(A.lyR,A.lyB))} in ${lyY} (${chgA(avgOf(A.tyR,A.tyB),avgOf(A.lyR,A.lyB))}) · per bus that went`);
   if(ttl)ttl.textContent=`Every route · whole holiday · ${h.label} ${tyY} results vs ${lyY}`;
 
   const LY='hp-ly hp-sep', LYc='hp-ly', TY='hp-ty';
-  const tips=(dir,d,s,yr,seats,P,B,N)=>({
+  const tips=(dir,d,s,yr,seats,P,B,N,R)=>({
+    rev:`<div class="od-head">${dir} · revenue, ${yr}</div>`
+      +d.map(r=>_hpLine(_hpDay(r[s].date),`${_hpMoney(r[s].revenue)} · ${_hpPeople(r[s].people)}`)).join('')
+      +`<div class="od-foot">Whole holiday: ${_hpMoney(R)}. Every ticket on these trips, short segments included.</div>`,
+    avg:`<div class="od-head">${dir} · average fare, ${yr}</div>`
+      +d.map(r=>_hpLine(_hpDay(r[s].date),_m2(avgOf(r[s].revenue,r[s].people)))).join('')
+      +`<div class="od-foot">Revenue ÷ people who traveled. Whole holiday: ${_m2(avgOf(R,P))}. More long trips in the mix also lifts the average.</div>`,
     people:`<div class="od-head">${dir} · people who traveled, ${yr}</div>`
       +d.map(r=>_hpLine(_hpDay(r[s].date),_hpPeople(r[s].people))).join('')+`<div class="od-foot">Whole holiday: ${_hpPeople(P)}</div>`,
     buses:`<div class="od-head">${dir} · buses that went, ${yr}</div>`
@@ -9460,6 +9474,10 @@ function _hpRenderRecap(h,secs,cur){
   const cells=(key,t,L,T)=>
       _hpHov(key+'|lp',L.people,LY)+`${_hpN(t.lyP)}</td>`+_hpHov(key+'|tp',T.people,TY)+`${_hpN(t.tyP)}</td>`
       +`<td class="${TY}" style="font-weight:700;color:${chgCol(t.tyP,t.lyP)}">${chg(t.tyP,t.lyP)}</td>`
+      +_hpHov(key+'|lr',L.rev,LY)+`${_hpMoneyK(t.lyR)}</td>`+_hpHov(key+'|tr',T.rev,TY)+`${_hpMoneyK(t.tyR)}</td>`
+      +`<td class="${TY}" style="font-weight:700;color:${chgCol(t.tyR,t.lyR)}">${chg(t.tyR,t.lyR)}</td>`
+      +_hpHov(key+'|la',L.avg,LY)+`${_m2(avgOf(t.lyR,t.lyP))}</td>`+_hpHov(key+'|ta',T.avg,TY)+`${_m2(avgOf(t.tyR,t.tyP))}</td>`
+      +`<td class="${TY}" style="font-weight:700;color:${chgColA(avgOf(t.tyR,t.tyP),avgOf(t.lyR,t.lyP))}">${chgA(avgOf(t.tyR,t.tyP),avgOf(t.lyR,t.lyP))}</td>`
       +_hpHov(key+'|lb',L.buses,LY)+`${_hpN(t.lyB)}</td>`+_hpHov(key+'|tb',T.buses,TY)+`${_hpN(t.tyB)}</td>`
       +_hpHov(key+'|ln',L.need,LY)+`${_hpN(t.lyN)}</td>`+_hpHov(key+'|tn',T.need,TY)+`${_hpN(t.tyN)}</td>`
       +_hpLoad(load(t.lyP,t.lyCap),LY)+_hpLoad(load(t.tyP,t.tyCap),TY)
@@ -9467,24 +9485,29 @@ function _hpRenderRecap(h,secs,cur){
       +_hpHov(key+'|tx',T.extra,TY,t.tyX>t.lyX?'color:var(--bad);font-weight:700':'color:var(--good);font-weight:700')+`${_hpN(t.tyX)}</td>`;
   let body='';
   secs.forEach(([s,cs])=>{
-    body+=`<tr class="ov-subhead"><td colspan="12">${_hpEsc(s)}</td></tr>`;
+    body+=`<tr class="ov-subhead"><td colspan="18">${_hpEsc(s)}</td></tr>`;
     cs.forEach(c=>{
       const t=tots.get(c), dir=_hpEsc(c.direction), k='r'+h.corridors.indexOf(c);
-      const L=tips(dir,c.days,'ly',lyY,t.seats,t.lyP,t.lyB,t.lyN), T=tips(dir,c.days,'ty',tyY,t.seats,t.tyP,t.tyB,t.tyN);
+      const L=tips(dir,c.days,'ly',lyY,t.seats,t.lyP,t.lyB,t.lyN,t.lyR), T=tips(dir,c.days,'ty',tyY,t.seats,t.tyP,t.tyB,t.tyN,t.tyR);
       body+=`<tr class="ov-row-link" onclick="hpPick(${__hpCors.indexOf(c.corridor)})"><td style="font-weight:700">${dir}</td>`+cells(k,t,L,T)+'</tr>';
     });
   });
   const secTip=(title,k,fmt)=>`<div class="od-head">All routes · ${title}</div>`
     +secs.map(([s])=>_hpLine(_hpEsc(s),fmt(secTot[s][k]))).join('')+`<div class="od-foot">Company-wide: ${fmt(A[k])}</div>`;
+  const secAvg=(yr,rk,pk)=>`<div class="od-head">All routes · average fare, ${yr}</div>`
+    +secs.map(([s])=>_hpLine(_hpEsc(s),_m2(avgOf(secTot[s][rk],secTot[s][pk])))).join('')
+    +`<div class="od-foot">Company-wide: ${_m2(avgOf(A[rk],A[pk]))} (revenue ÷ people who traveled)</div>`;
   const TL={people:secTip(`people who traveled, ${lyY}`,'lyP',_hpPeople),buses:secTip(`buses that went, ${lyY}`,'lyB',_hpBuses),
-            need:secTip(`buses needed at optimal capacity, ${lyY}`,'lyN',_hpBuses),extra:secTip(`extra buses run, ${lyY}`,'lyX',_hpBuses)};
+            need:secTip(`buses needed at optimal capacity, ${lyY}`,'lyN',_hpBuses),extra:secTip(`extra buses run, ${lyY}`,'lyX',_hpBuses),
+            rev:secTip(`revenue, ${lyY}`,'lyR',_hpMoney),avg:secAvg(lyY,'lyR','lyP')};
   const TT={people:secTip(`people who traveled, ${tyY}`,'tyP',_hpPeople),buses:secTip(`buses that went, ${tyY}`,'tyB',_hpBuses),
-            need:secTip(`buses needed at optimal capacity, ${tyY}`,'tyN',_hpBuses),extra:secTip(`extra buses run, ${tyY}`,'tyX',_hpBuses)};
+            need:secTip(`buses needed at optimal capacity, ${tyY}`,'tyN',_hpBuses),extra:secTip(`extra buses run, ${tyY}`,'tyX',_hpBuses),
+            rev:secTip(`revenue, ${tyY}`,'tyR',_hpMoney),avg:secAvg(tyY,'tyR','tyP')};
   const totalRow=`<tr class="hp-total"><td>All routes · company-wide</td>`+cells('T',A,TL,TT)+'</tr>';
   const grp=(label,n)=>`<th colspan="${n}" class="hp-grp hp-sep">${label}</th>`;
   const yrs=`<th class="${LY}">${lyY}</th><th class="${TY}">${tyY}</th>`;
-  sum.innerHTML=`<thead><tr><th rowspan="2">Direction</th>${grp('People',3)}${grp('Buses went',2)}${grp('Needed at full capacity',2)}${grp('Load',2)}${grp('Extra buses',2)}</tr>`
-    +`<tr>${yrs}<th class="${TY}" data-tip="People ${tyY} vs ${lyY}">Change</th>${yrs}${yrs}${yrs}${yrs}</tr></thead>`
+  sum.innerHTML=`<thead><tr><th rowspan="2">Direction</th>${grp('People',3)}${grp('Revenue',3)}${grp('Avg fare',3)}${grp('Buses went',2)}${grp('Needed at full capacity',2)}${grp('Load',2)}${grp('Extra buses',2)}</tr>`
+    +`<tr>${yrs}<th class="${TY}" data-tip="People ${tyY} vs ${lyY}">Change</th>${yrs}<th class="${TY}" data-tip="Revenue ${tyY} vs ${lyY}">Change</th>${yrs}<th class="${TY}" data-tip="Average fare ${tyY} vs ${lyY}">Change</th>${yrs}${yrs}${yrs}${yrs}</tr></thead>`
     +`<tbody>${body}</tbody><tfoot>${totalRow}</tfoot>`;
 
   det.innerHTML=h.corridors.map((c,ci)=>({c,ci})).filter(o=>o.c.corridor===cur).map(({c,ci})=>{
@@ -9498,6 +9521,10 @@ function _hpRenderRecap(h,secs,cur){
         +`<td class="${LY}">${L.buses}</td><td class="${TY}">${T.buses}</td>`
         +`<td class="${LY}">${_hpN(L.people)}</td><td class="${TY}">${_hpN(T.people)}</td>`
         +`<td class="${TY}" style="font-weight:700;color:${chgCol(T.people,L.people)}">${chg(T.people,L.people)}</td>`
+        +`<td class="${LY}">${_hpMoney(L.revenue)}</td><td class="${TY}">${_hpMoney(T.revenue)}</td>`
+        +`<td class="${TY}" style="font-weight:700;color:${chgCol(T.revenue,L.revenue)}">${chg(T.revenue,L.revenue)}</td>`
+        +`<td class="${LY}">${_m2(avgOf(L.revenue,L.people))}</td><td class="${TY}">${_m2(avgOf(T.revenue,T.people))}</td>`
+        +`<td class="${TY}" style="font-weight:700;color:${chgColA(avgOf(T.revenue,T.people),avgOf(L.revenue,L.people))}">${chgA(avgOf(T.revenue,T.people),avgOf(L.revenue,L.people))}</td>`
         +`<td class="${LY}">${L.buses_needed}</td><td class="${TY}">${T.buses_needed}</td>`
         +_hpLoad(L.load_pct,LY)+_hpLoad(T.load_pct,TY)+'</tr>';
     }).join('');
@@ -9506,14 +9533,18 @@ function _hpRenderRecap(h,secs,cur){
     const totRow=`<tr class="hp-total"><td>Total</td><td class="${LY}">${_hpN(tt.lyT)}</td><td class="${TY}">${_hpN(tt.tyT)}</td>`
       +`<td class="${LY}">${_hpN(tt.lyB)}</td><td class="${TY}">${_hpN(tt.tyB)}</td><td class="${LY}">${_hpN(tt.lyP)}</td><td class="${TY}">${_hpN(tt.tyP)}</td>`
       +`<td class="${TY}" style="font-weight:700;color:${chgCol(tt.tyP,tt.lyP)}">${chg(tt.tyP,tt.lyP)}</td>`
+      +`<td class="${LY}">${_hpMoney(tt.lyR)}</td><td class="${TY}">${_hpMoney(tt.tyR)}</td>`
+      +`<td class="${TY}" style="font-weight:700;color:${chgCol(tt.tyR,tt.lyR)}">${chg(tt.tyR,tt.lyR)}</td>`
+      +`<td class="${LY}">${_m2(avgOf(tt.lyR,tt.lyP))}</td><td class="${TY}">${_m2(avgOf(tt.tyR,tt.tyP))}</td>`
+      +`<td class="${TY}" style="font-weight:700;color:${chgColA(avgOf(tt.tyR,tt.tyP),avgOf(tt.lyR,tt.lyP))}">${chgA(avgOf(tt.tyR,tt.tyP),avgOf(tt.lyR,tt.lyP))}</td>`
       +`<td class="${LY}">${_hpN(tt.lyN)}</td><td class="${TY}">${_hpN(tt.tyN)}</td>${_hpLoad(load(tt.lyP,tt.lyCap),LY)}${_hpLoad(load(tt.tyP,tt.tyCap),TY)}</tr>`;
     return `<div class="ov-panel" style="margin-bottom:18px">`
       +`<div class="ov-panel-head"><div class="ov-panel-title">${_hpEsc(c.direction)}</div><span style="font-size:10px;color:var(--text3)">${seats} seats per bus</span></div>`
       +`<div style="padding:10px 14px 4px"><div class="hp-charts"><div class="hp-chart"><div class="hp-chart-t">Tickets sold</div>${hpCurve(c,-1,{done:true,key:'t'+'x'+ci,ly:String(lyY),ty:String(tyY),basis:h.curve_basis,first:h.window.ty[0],lyFirst:h.window.ly[0]})}<div class="hp-legend"><b>━ ${lyY}</b> &nbsp; <b style="color:var(--green2)">━ ${tyY}</b> &nbsp; cumulative tickets${h.curve_basis==='first_travel_day'?' before the first travel day ('+_hpDay(h.window.ty[0])+'), both years counted to the same day':' by days before travel'}</div></div><div class="hp-chart"><div class="hp-chart-t">Revenue</div>${hpCurve(c,-1,{done:true,rev:true,key:'r'+'x'+ci,ly:String(lyY),ty:String(tyY),basis:h.curve_basis,first:h.window.ty[0],lyFirst:h.window.ly[0]})}<div class="hp-legend"><b>━ ${lyY}</b> &nbsp; <b style="color:var(--green2)">━ ${tyY}</b> &nbsp; cumulative revenue${h.curve_basis==='first_travel_day'?' before the first travel day ('+_hpDay(h.window.ty[0])+'), both years counted to the same day':' by days before travel'}, every ticket on these trips</div></div></div></div>`
       +`<div class="table-wrap" style="border:none;border-radius:0"><table class="dt"><thead>`
-      +`<tr><th rowspan="2">Travel day</th>${grp('Trips',2)}${grp('Buses went',2)}${grp('People',3)}${grp('Needed',2)}${grp('Load',2)}</tr>`
+      +`<tr><th rowspan="2">Travel day</th>${grp('Trips',2)}${grp('Buses went',2)}${grp('People',3)}${grp('Revenue',3)}${grp('Avg fare',3)}${grp('Needed',2)}${grp('Load',2)}</tr>`
       +`<tr><th class="${LY}" data-tip="Hover for every trip by departure time; click to keep it open">${lyY}</th><th class="${TY}" data-tip="Hover for every trip by departure time; click to keep it open">${tyY}</th>`
-      +`${yrs}${yrs}<th class="${TY}">Change</th><th class="${LY}" data-tip="People ÷ ${seats} per bus, rounded up">${lyY}</th><th class="${TY}" data-tip="People ÷ ${seats} per bus, rounded up">${tyY}</th>${yrs}</tr>`
+      +`${yrs}${yrs}<th class="${TY}">Change</th>${yrs}<th class="${TY}">Change</th><th class="${LY}" data-tip="Revenue ÷ people who traveled">${lyY}</th><th class="${TY}" data-tip="Revenue ÷ people who traveled">${tyY}</th><th class="${TY}">Change</th><th class="${LY}" data-tip="People ÷ ${seats} per bus, rounded up">${lyY}</th><th class="${TY}" data-tip="People ÷ ${seats} per bus, rounded up">${tyY}</th>${yrs}</tr>`
       +`</thead><tbody>${rows}</tbody><tfoot>${totRow}</tfoot></table></div></div>`;
   }).join('');
 }
