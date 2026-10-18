@@ -6493,7 +6493,15 @@ const V4_RAISE_SCORE     = 0.24;  // composite score above this → Raise
 const V4_RAISE_LOAD      = 0.65;  // ...OR load above this → Raise (near-full bus)
 const V4_LOWER_SCORE     = -0.40; // score below this (necessary, not sufficient) → Lower
 const V4_LOWER_GAP_PCT   = 16;    // ...AND priced this % over FlixBus
-const V4_LOWER_LOAD      = 0.40;  // ...AND load under this
+const V4_LOWER_LOAD      = 0.40;  // RETIRED from the cut gate 2026-10-18 (kept for reference) -- see V4_LOWER_MAX_DAYS
+// Cut gate rebuilt 2026-10-18 (Owen: "build it"). A cut used to need "load under 40% TODAY", but a trip 1-2 weeks out
+// is nearly empty by design (~38% of tickets sell on the day; 10-14 days out a route has ~10% of its final), so the
+// engine was cutting trips that fill anyway: 10/08-10/17 Providence got 444 cuts and 0 raises, 62% of them 8-14 days
+// out. Now a cut also needs the trip to be BEHIND its own route's booking curve (the Momentum "Soft" call: pace <= -20%
+// once the route has usually sold >= MOM_SOFT_MIN_SHARE of its final), to be heading for a mostly empty bus, and to
+// leave within V4_LOWER_MAX_DAYS. No curve to judge by = no cut. Kill switch: __sugPaceGate=false.
+const V4_LOWER_MAX_DAYS      = 7;   // no cut further out than this
+const V4_LOWER_MAX_PROJ_LOAD = 60;  // ...and only when the trip is projected to finish under this % of its seats
 const V4_NOCOMP_MIN_LOAD = 0.30;  // no-FlixBus-match trips: never raise under this load
 // MAX_RAISE_PCT (+50% raise ceiling) is declared next to raiseCeiling() below.
 
@@ -7386,9 +7394,43 @@ function sugSatMorning(r){
   const d=new Date(r.dateISO+'T12:00:00');
   return d.getDay()===6&&r.depMins>=240&&r.depMins<720;
 }
+var __sugPaceGate=true;
+var __v4PaceIdx=null,__v4PaceIdxN=-1;
+// The suggestion row's booking pace from the Momentum engine. A trip with no sale yet is absent from the revenue
+// report, so it is rebuilt from the schedule's route group with the known count (0 or the dispatch figure).
+function _v4PaceFor(r){
+  if(typeof snapData==='undefined'||!snapData||typeof momPace!=='function')return null;
+  if(__v4PaceIdxN!==snapData.length){
+    __v4PaceIdx={rows:{},rg:{}};
+    for(var i=0;i<snapData.length;i++){var x=snapData[i],iso=capISO(x.depDate);
+      if(iso)__v4PaceIdx.rows[x.sched+'|'+iso]=x; if(x.rg!=null&&__v4PaceIdx.rg[x.sched]==null)__v4PaceIdx.rg[x.sched]=x.rg;}
+    __v4PaceIdxN=snapData.length;
+  }
+  if(!r||!r.schedule||!r.dateISO)return null;
+  var sr=__v4PaceIdx.rows[r.schedule+'|'+r.dateISO];
+  if(!sr){
+    if(r.paxPerTrip==null||__v4PaceIdx.rg[r.schedule]==null)return null;
+    sr={sched:r.schedule,depDate:new Date(r.dateISO+'T00:00:00'),tix:r.paxPerTrip,rg:__v4PaceIdx.rg[r.schedule]};
+  }
+  return momPace(sr);
+}
+// Is a cut allowed on this trip? {ok, why (plain words, used in the hold reason), m (pace)}.
+function _v4LowerGate(r){
+  if(!__sugPaceGate)return {ok:true,why:'',m:null};
+  if(r.daysOut==null)return {ok:false,why:'no departure date to judge by',m:null};
+  if(r.daysOut>V4_LOWER_MAX_DAYS)return {ok:false,why:'leaves in '+r.daysOut+' days and most of its tickets sell closer in (no cut more than '+V4_LOWER_MAX_DAYS+' days out)',m:null};
+  var m=_v4PaceFor(r);
+  if(!m)return {ok:false,why:'no usual booking curve to compare it with',m:null};
+  if(m.tooEarly)return {ok:false,why:'too few tickets are normally sold by now to judge it',m:m};
+  var ex=Math.round(m.expNow);
+  if(m.expPct<MOM_SOFT_MIN_SHARE)return {ok:false,why:'its route usually has only '+Math.round(m.expPct)+'% of its tickets sold by now, too early to call it soft',m:m};
+  if(m.pace>-20)return {ok:false,why:'it is selling at its usual pace ('+m.tix+' sold vs about '+ex+' normally by now)',m:m};
+  if(m.projLoad!=null&&m.projLoad>=V4_LOWER_MAX_PROJ_LOAD)return {ok:false,why:'it is still heading for about '+Math.min(m.projLoad,100)+'% full',m:m};
+  return {ok:true,why:'',m:m};
+}
 function computeV4(r){
   const L=_v4LoadScore(r), G=_v4GapScore(r), P=_v4PaceScore(r), F=_v4FlixSeatsScore(r);
-  let score,action='Hold',target=r.fare,scoreSource;
+  let score,action='Hold',target=r.fare,scoreSource,lowerGate=null;
   const FX=_v4Flix(r);
   const RULED=mktRuled(r.od,r.dateISO,r.schedule);   // MMC already yield-manages this trip
   if(FX!==null){
@@ -7403,8 +7445,8 @@ function computeV4(r){
       action='Raise';
       target=priceTarget(r.fare+0.5*Math.max(0,FX-r.fare));
       if(target<=r.fare)target=priceTarget(r.fare+1);
-    } else if(score<V4_LOWER_SCORE&&r.gapPct>V4_LOWER_GAP_PCT&&(RULED||_v4LoadFor(r)<V4_LOWER_LOAD)){
-      // the "fairly empty" condition is also a load test, so on a ruled market the gap alone decides
+    } else if(score<V4_LOWER_SCORE&&r.gapPct>V4_LOWER_GAP_PCT&&(lowerGate=_v4LowerGate(r)).ok){
+      // "fairly empty" is judged against the trip's own booking curve, not today's load (2026-10-18)
       action='Lower';target=priceTarget(FX*0.97);
     }
   } else if(RULED){
@@ -7482,7 +7524,10 @@ function computeV4(r){
     if(raiseCapped) reason+=' (capped at +50% of current)';
     if(milCapped) reason+=' (capped at the mileage fare '+fMoney(MIL)+': above it customers pay the mileage fare instead)';
   } else if(action==='Lower'){
-    reason='+'+Math.round(r.gapPct)+'% over '+_compName(r)+', only '+_lp+'% full, demand soft → lower to '+fMoney(target)+'.';
+    const _gm=lowerGate&&lowerGate.m;
+    reason='+'+Math.round(r.gapPct)+'% over '+_compName(r)+', '+(_gm&&!_gm.tooEarly
+      ? 'behind its usual booking ('+_gm.tix+' sold vs about '+Math.round(_gm.expNow)+' normally by now'+(_gm.projLoad!=null?', heading for about '+Math.min(_gm.projLoad,100)+'% full':'')+')'
+      : 'only '+_lp+'% full')+' → lower to '+fMoney(target)+'.';
     // Mirrors the raise note. This string lands in change_log.jsonl, so a cut that was
     // held back by the floor must SAY so — otherwise the audit trail shows a target
     // with no indication the model actually wanted to go lower.
@@ -7501,7 +7546,7 @@ function computeV4(r){
   } else if(score<V4_LOWER_SCORE){
     const why=[];
     if(!(r.gapPct>V4_LOWER_GAP_PCT))why.push('not priced >'+V4_LOWER_GAP_PCT+'% over '+_compName(r));
-    if(!(_v4LoadFor(r)<V4_LOWER_LOAD))why.push(_lp+'% full');
+    else { const _lg=lowerGate||_v4LowerGate(r); if(!_lg.ok&&_lg.why)why.push(_lg.why); }
     reason='Soft demand, but '+(why.join(' and ')||'cut conditions not met')+' — hold.';
   } else {
     reason='Signals mixed (score '+(score>=0?'+':'')+score.toFixed(2)+') — hold at '+fMoney(r.fare)+'.';
