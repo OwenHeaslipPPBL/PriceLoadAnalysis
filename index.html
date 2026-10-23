@@ -3945,6 +3945,22 @@ body{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <!-- <<INJECT_DATA>> -->
 <script>
 
@@ -7638,10 +7654,13 @@ function mktRaiseOnly(od,depISO,sched){
 function _v4Flix(r){ return (r.compRef!==undefined ? r.compRef : (r.flixRef!=null?r.flixRef:r.flixFare)); }
 // Mileage-fare CEILING for Price Suggestions (2026-10-04; the fact was proved 2026-10-01 from the booking API):
 // MMC offers every trip at the Advanced Purchase fare (market fare or our override) AND the mileage fare
-// (PPB-200), both after the ladder step, and the customer pays the cheaper. So a raise above the mileage fare
+// (PPB-200), both after the ladder step. 2026-10-23: WRONG - the site sells the AP fare whenever there is one, even
+// above the mileage fare (806 of 869 Providence > NYC coupons 10/15-10/22 were Passenger (AP)). Ceiling switched off
+// in sugMileageNow. Old reading: the customer pays the cheaper, so a raise above the mileage fare
 // at today's step is never charged. Per trip, from the price-layers data (the scrape's Mileage Fare column),
 // joined on the same row key; null when unknown, and then the suggestion is unchanged.
 function sugMileageNow(r){
+  return null;   // 2026-10-23: OFF. The site sells the AP fare even above the mileage fare, so there is no ceiling.
   try{
     if(typeof lyData!=='function')return null;
     const d=lyData();if(!d||!d.trips||!d.ix||d.ix.mil_live==null)return null;
@@ -10379,7 +10398,7 @@ function mfPriceCheck(row, newFare){
   }catch(e){}
   const r99 = x => Math.round((Math.max(0, Math.floor(x - 0.99 + 0.5)) + 0.99) * 100) / 100;
   const ap = rate ? r99(newFare * (1 + rate / 100)) : newFare;
-  const above = mil != null && ap > mil + 0.005;
+  const above = false;   // 2026-10-23: the site sells the AP fare even above the mileage fare, so no not-charged warning
   const pays = above ? mil : ap;
   const m = v => '$' + v.toFixed(2);
   const step = rate ? ` (${m(newFare)} x this trip's ${rate > 0 ? '+' : ''}${rate}% ladder step)` : (rate === null ? ' (ladder step not known for this trip)' : '');
@@ -11589,7 +11608,7 @@ function lyMkHow() {
     + "<li><b>Pace:</b> end-to-end tickets sold so far for the row’s departures, per departure, against the same weekday-aligned departures last year (364 days back) at the same point. Matched on the far-end city in both years, because most schedules were renumbered since 2025.</li>"
     + "<li><b>Competitor:</b> how many of our trips in the next ~13 days have a cheaper Flix or OurBus direct trip within an hour, from Price Suggestions’ own match (needs " + LY_MK.minComp + "+ matches to count).</li>"
     + "<li><b>Lower $" + LY_MK.step + "</b> when pace is at or below " + Math.round(LY_MK.lower * 100) + "% and a competitor is cheaper on " + Math.round(LY_MK.comp * 100) + "%+ of matches (or there are too few to count). <b>Raise $" + LY_MK.step + "</b> when pace is " + Math.round(LY_MK.raise * 100) + "%+ and a competitor is cheaper on " + Math.round(LY_MK.compLow * 100) + "% or less. Otherwise hold. One step at a time; needs " + LY_MK.minLY + "+ last-year tickets.</li>"
-    + "<li><b>The mileage fare is a ceiling.</b> MMC offers every trip at the Advanced Purchase fare (market fare or override) and at the mileage fare, both after the ladder step, and the customer pays the cheaper. A base above the mileage fare is never charged, so raises stop there.</li>"
+    + "<li><b>The Advanced Purchase fare is what sells.</b> MMC offers every trip at the Advanced Purchase fare (market fare or override) and at the mileage fare, both after the ladder step. The website sells the Advanced Purchase fare whenever the trip has one, even when the mileage fare is cheaper (checked 10/23 on the site and in the ticket manifest); the mileage fare sells only where there is no Advanced Purchase fare.</li>"
     + "<li>Caveats: pace is per departure because departures changed since last year; on Philadelphia it includes the DC buses that stop there (about 11% of its riders); average paid mixes price changes with who booked; the competitor read covers only the next ~13 days.</li></ul></details>";
 }
 function lyRenderMarkets(head, bar, body) {
@@ -11849,7 +11868,7 @@ function lyOpen(key) {
   h += lay(n.mil == null ? (t.layer === "r" ? "on" : "off") : (apSells ? "set" : "on"), 1, "Mileage fare (rack, PPB-200)", n.mil == null ? "Not captured in this scrape (captured from the 10/02 scrape on)" : (apSells ? "Offered too, after the same step, but dearer" : "Cheaper than the Advanced Purchase fare, so this is what customers buy"), n.mil == null ? "—" : lyMoney(n.mil));
   if (t.start != null || n.mil != null) {
     h += "<div class=\"ly-math\">" + (t.start != null ? "Advanced Purchase: " + (t.layer === "o" ? "override " : "base ") + "<b>" + lyMoney(t.start) + "</b> × " + (1 + t.rate / 100).toFixed(2) + " = " + (t.start * (1 + t.rate / 100)).toFixed(2) + " → nearest .99 = <b>" + lyMoney(n.ap) + "</b>" : "Advanced Purchase: " + lyMoney(t.ap))
-      + (n.mil != null ? "<br>Mileage fare at this step: <b>" + lyMoney(n.mil) + "</b><br>The customer pays the cheaper: <b>" + lyMoney(n.pay) + "</b>" : "") + "</div>";
+      + (n.mil != null ? "<br>Mileage fare at this step: <b>" + lyMoney(n.mil) + "</b><br>The customer pays (the Advanced Purchase fare when there is one): <b>" + lyMoney(n.pay) + "</b>" : "") + "</div>";
   }
   h += "<div class=\"ly-sec\">Where the price goes from here</div>";
   if (dout < 0) h += "<div class=\"ly-math\">This trip has left.</div>";
