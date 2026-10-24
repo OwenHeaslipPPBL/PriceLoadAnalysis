@@ -4042,6 +4042,23 @@ body{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <!-- <<INJECT_DATA>> -->
 <script>
 
@@ -4713,6 +4730,54 @@ function odHist(){
   }catch(e){__odHist={};}
   return __odHist;
 }
+// 2026-10-24 (Owen): a trip is SOLD OUT when any stretch between two stops is full -- the tickets riding that stretch reach
+// dispatch's committed seats for the trip. Stops in travel order = pp-routes; tickets by stop pair = odFor. This replaces
+// dispatch's maxCapacityUsed, which on one bus is often the trip's TOTAL tickets and on a double is one bus's peak.
+var __routes=null;
+function routeFor(sched){
+  if(!__routes){__routes={};try{const el=document.getElementById('pp-routes');if(el&&el.textContent.trim())__routes=JSON.parse(el.textContent);}catch(e){__routes={};}}
+  return __routes[String(sched||'').trim()]||null;
+}
+function legLoadsFrom(stops,entries,seats){
+  const st=stops.map(stopNorm), idx={};
+  st.forEach((x,i)=>{idx[x]=i;});
+  const on=new Array(Math.max(1,st.length-1)).fill(0);
+  let lost=0,total=0;
+  (entries||[]).forEach(e=>{const a=idx[stopNorm(e.from)],b=idx[stopNorm(e.to)],n=+e.count||0;total+=n;
+    if(a==null||b==null||a>=b){lost+=n;return;}
+    for(let i=a;i<b;i++)on[i]+=n;});
+  const full=[];on.forEach((x,i)=>{if(seats>0&&x>=seats)full.push(i);});
+  return {stops:st,on:on,peak:Math.max.apply(null,on),full:full,lost:lost,total:total,seats:seats};
+}
+function legLoads(sched,iso,seats){
+  if(!(seats>0))return null;
+  const st=routeFor(sched); if(!st)return null;
+  const ent=odFor(sched,iso); if(!ent)return null;
+  const L=legLoadsFrom(st,ent,seats);
+  if(L.total&&L.lost/L.total>0.1)return null;      // the stop list does not fit these tickets: fall back to dispatch
+  return L;
+}
+function stretchHtml(L,ops){
+  const bz=(ops&&(ops.buses||1)>1)?' on '+ops.buses+' buses':'';
+  const nm=s=>_stopEsc(s);
+  let h='<div style="margin-top:6px"><b>On board by stretch</b> <span style="color:var(--text3)">(from the tickets; '+L.seats+' seats'+bz+' per dispatch)</span></div>';
+  h+='<table class="od-tt"><tbody>'+L.on.map((x,i)=>{const f=x>=L.seats;
+    return '<tr'+(f?' style="color:var(--bad);font-weight:600"':'')+'><td>'+nm(L.stops[i])+' &rarr; '+nm(L.stops[i+1])+'</td><td class="r">'+x+' of '+L.seats+(f?' &middot; FULL':'')+'</td></tr>';}).join('')+'</tbody></table>';
+  if(L.full.length){
+    const so={},ok={};
+    for(let a=0;a<L.stops.length;a++)for(let b=a+1;b<L.stops.length;b++){
+      let mx=0;for(let i=a;i<b;i++)mx=Math.max(mx,L.on[i]);
+      const free=L.seats-mx;
+      if(free<=0)(so[a]=so[a]||[]).push(b); else (ok[a]=ok[a]||[]).push([b,free]);
+    }
+    const line=(m,fn)=>Object.keys(m).map(a=>nm(L.stops[a])+' to '+m[a].map(fn).join(', ')).join(' &middot; ');
+    h+='<div style="margin-top:4px;color:var(--bad)"><b>Sold out:</b> '+line(so,b=>nm(L.stops[b]))+'</div>';
+    if(Object.keys(ok).length)h+='<div style="margin-top:2px;color:var(--good)"><b>Still on sale:</b> '+line(ok,p=>nm(L.stops[p[0]])+' ('+p[1]+' seats)')+'</div>';
+  } else {
+    h+='<div style="margin-top:4px;color:var(--text2)">Fullest stretch '+L.peak+' of '+L.seats+': '+(L.seats-L.peak)+' seats free on it</div>';
+  }
+  return h;
+}
 function odFor(sched,iso){
   const k=String(sched).trim()+'|'+isoToMDYY(iso);
   return (window.manifestOD&&window.manifestOD[k])||odHist()[k]||null;
@@ -4888,7 +4953,7 @@ function showStopTip(ev,sched,dk){
   tip.innerHTML=`<div class="od-head">Sched ${_stopEsc(String(sched).trim())} &middot; ${isoToMDYY(dk)} &middot; ${se}</div>${rows}`+
     `<div class="od-foot">Getting on: <strong>${s.on}</strong> &middot; getting off: <strong>${s.off}</strong>`+
     (s.hasV&&s.all?` &middot; revenue <strong>$${Math.round(s.v).toLocaleString()}</strong>`:'')+
-    `<div style="margin-top:3px;color:var(--text3)">Whole trip: ${s.all} ticketed${(()=>{const o=(typeof opsLookup!=='undefined'&&opsLookup)?opsLookup[String(sched).trim()+'|'+dk]:null;return o&&o.max!=null?' &middot; most on board at once '+((o.seats&&o.max>o.seats)?o.seats:o.max)+(o.seats?' of '+o.seats:''):'';})()}</div></div>`;
+    `<div style="margin-top:3px;color:var(--text3)">Whole trip: ${s.all} ticketed${(()=>{const o=(typeof opsLookup!=='undefined'&&opsLookup)?opsLookup[String(sched).trim()+'|'+dk]:null;const Lg=(o&&o.seats)?legLoads(String(sched).trim(),dk,o.seats):null;if(Lg)return ' &middot; fullest stretch '+Lg.peak+' of '+Lg.seats+(Lg.full.length?' &middot; sold out':'');return o&&o.max!=null?' &middot; most on board at once '+((o.seats&&o.max>o.seats)?o.seats:o.max)+(o.seats?' of '+o.seats:''):'';})()}</div></div>`;
   tip.classList.add('show');posODTip(ev);
 }
 function showStopDayTip(ev,dk){
@@ -4962,7 +5027,11 @@ function showODTip(ev,sched,dateISO){
   // future trip = the most booked over any one stretch of the route.
   const _ops=(typeof opsLookup!=='undefined'&&opsLookup)?opsLookup[sched.trim()+'|'+dateISO]:null;
   let maxLine='';
-  if(_ops&&_ops.max!=null){
+  // 2026-10-24 (Owen): on board stretch by stretch from the tickets, against dispatch's seats for this trip.
+  const _legsT=(_ops&&_ops.seats)?legLoads(sched,dateISO,_ops.seats):null;
+  if(_legsT){
+    maxLine=stretchHtml(_legsT,_ops);
+  } else if(_ops&&_ops.max!=null){
     const _bz=(_ops.buses||1)>1?' on '+_ops.buses+' buses':'';
     // 2026-10-23: dispatch can report more than the seats on a bus (often the trip's total tickets); never show more than the seats.
     const _over=_ops.seats&&_ops.max>_ops.seats, _shown=_over?_ops.seats:_ops.max;
@@ -6968,6 +7037,10 @@ function tripStatus(tix, schedule, dateISO){
     // the only capacity comparison here that does not use the `|| fallback` idiom, which
     // is exactly why it was the only one a bad zero could corrupt.
     // These trips are NOT silently dropped: renderOverview counts them and says so.
+    // 2026-10-24 (Owen): sold out = a full stretch, from the tickets on each stretch (legLoads); dispatch's max only when
+    // we have no stop data for this trip.
+    const _legs=legLoads(sched,dateISO,ops.seats);
+    if(_legs)return {doubled:doubled, soldOut:ops.seats>0&&_legs.peak>=ops.seats, source:'tickets-by-stretch', busCount:busCount, legs:_legs};
     if(ops.max != null && ops.seats != null){
       soldOut = ops.seats > 0 && ops.max >= ops.seats;
     } else {
@@ -8013,7 +8086,11 @@ function showSugBreakdownTip(ev,key){
   if(sold!=null)occ+=row('Sold (all legs)', sold+' tix'+(r.paxSrc==='dispatch'?' <span style="color:var(--text3);font-size:10px">(dispatch count)</span>':''),'var(--text2)');
   else occ+=row('Sold', '<i style="color:var(--text3)">no count</i>');
   if(r.remaining!==null){const rc=r.remaining<5?'var(--bad)':r.remaining<15?'var(--warn)':'var(--text2)';occ+=row('Bookable at this fare', String(r.remaining), rc);}
-  if(ops.max!=null&&ops.max>0&&ops.seats!=null&&ops.seats>0){
+  const _legsS=(ops.seats>0)?legLoads(sched,iso,ops.seats):null;
+  if(_legsS){
+    const pk=Math.round(_legsS.peak/_legsS.seats*100), so=_legsS.peak>=_legsS.seats;
+    occ+=row('Fullest stretch', so?'SOLD OUT':(_legsS.peak+'/'+_legsS.seats+' ('+pk+'%)'), so?'var(--bad)':pk>=80?'var(--warn)':'var(--good)');
+  } else if(ops.max!=null&&ops.max>0&&ops.seats!=null&&ops.seats>0){
     const pk=Math.round(ops.max/ops.seats*100), so=ops.max>=ops.seats;
     occ+=row('Peak on board', so?'SOLD OUT':(ops.max+'/'+ops.seats+' ('+pk+'%)'), so?'var(--bad)':pk>=80?'var(--warn)':'var(--good)');
   }
