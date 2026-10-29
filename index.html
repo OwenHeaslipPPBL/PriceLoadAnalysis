@@ -4314,6 +4314,23 @@ body{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <!-- <<INJECT_DATA>> -->
 <script>
 
@@ -10075,7 +10092,8 @@ function hpCurve(c,dOut,o){
   const maxD=Math.min(90,Math.max(HP_CURVE_DAYS,dOut+8),Math.max(dOut+7,21,...(keys.length?keys:[0])));
   const minD=cal?Math.min(0,...keys,...tkeys):0;
   const cum=(h,x)=>{let s=0;for(const k in h){if(+k>=x)s+=h[k];}return s;};
-  const W=560,H=170,L=46,R=12,T=12,B=26;
+  const cap=(!o.done&&cal)?18:0;   // Owen 2026-10-29: the At now line sat on the lines -> a band above the plot
+  const W=560,H=170+cap,L=46,R=12,T=12+cap,B=26;
   const xs=[];for(let x=maxD;x>=minD;x--)xs.push(x);
   const lyP=xs.map(x=>[x,cum(ly,x)]);
   // this year's line ends at the END OF YESTERDAY, also while the holiday is underway (dOut < 0); only the results view
@@ -10101,7 +10119,7 @@ function hpCurve(c,dOut,o){
     g+=`<line x1="${X(xNow)}" y1="${T}" x2="${X(xNow)}" y2="${H-B}" stroke-dasharray="3 3" style="stroke:var(--green)"/>`
       +`<text x="${X(xNow)+4}" y="${T+10}" font-size="10" style="fill:var(--green2)">${cal?'now':'today'}</text>`;
     if(cal){const a=cum(ty,xNow),b=cum(ly,xNow);
-      g+=`<text x="${L+6}" y="${T+10}" font-size="10" style="fill:var(--text2)">At now (sales through yesterday): ${_hpEsc(o.ty||'')} ${fmt(a)} · ${_hpEsc(o.ly||'')} ${fmt(b)}${b?' · '+Math.round(100*a/b)+'%':''}</text>`;}
+      g+=`<text x="${L}" y="13" font-size="10" style="fill:var(--text2)">At now (sales through yesterday): ${_hpEsc(o.ty||'')} ${fmt(a)} · ${_hpEsc(o.ly||'')} ${fmt(b)}${b?' · '+Math.round(100*a/b)+'%':''}</text>`;}
   }
   g+=`<path d="${path(lyP)}" fill="none" stroke-width="2" style="stroke:var(--text3)"/>`;
   if(tyP.length)g+=`<path d="${path(tyP)}" fill="none" stroke-width="2.5" style="stroke:var(--green)"/>`;
