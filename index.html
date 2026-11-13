@@ -330,6 +330,14 @@ table.pivot thead th.s1,table.pivot thead th.s2,table.pivot thead th.s3{z-index:
 
 /* date column header */
 .date-th{text-align:center;}
+
+/* Holiday band over the Loads date headers (Owen 2026-11-13). Opaque fills: the header row is sticky over the rows below. */
+table.pivot thead tr#pivotHolHead th{top:0;padding:3px 4px 5px;font-size:9px;letter-spacing:1px;line-height:13px;border-bottom:none;}
+table.pivot thead tr#pivotHolHead th.pv-hol{text-align:center;color:var(--green2);cursor:default;box-shadow:inset 0 -2px 0 var(--green);
+  background:linear-gradient(rgba(6,136,60,.14),rgba(6,136,60,.14)),var(--surface2);}
+table.pivot thead tr#pivotHolHead th.pv-hol-none{background:var(--surface2);}
+.pv-hol-t{width:0;min-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+table.pivot.pv-has-hol thead tr#pivotHead th{top:var(--pv-hol-h,20px);}
 .date-th .dth-day{font-size:9px;color:var(--text3);letter-spacing:1px;font-family:'Exo 2',sans-serif;}
 .date-th .dth-num{font-size:13px;font-weight:800;color:var(--text);font-family:'Exo 2',sans-serif;}
 .date-th.today-col .dth-num{color:var(--yellow);}
@@ -4943,6 +4951,23 @@ body{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <!-- <<INJECT_DATA>> -->
 <script>
 
@@ -5810,7 +5835,7 @@ function renderLoadsStop(inRange,isPast,today){
         `<div class="dth-day">${h.day}</div><div class="dth-num">${h.date}</div>`+
         `<div class="dth-avg">${d.on+d.off}</div></th>`;
   });
-  document.getElementById('pivotHead').innerHTML=hh;
+  document.getElementById('pivotHead').innerHTML=hh;pvHolBand(dateKeys);
   const body=document.getElementById('pivotBody');
   if(!trips.length){
     body.innerHTML=`<tr><td colspan="${3+dateKeys.length}" class="empty"><span class="empty-icon">&#128269;</span><div class="empty-text">No trips stopping at ${se} in this window</div></td></tr>`;
@@ -6072,6 +6097,45 @@ function bcCell(val,cap,isFuture){
   return`<td class="bc-val ${tint}">${val}<span class="bc-pct">${pct}%</span></td>`;
 }
 
+// Holiday band over the Loads date headers (Owen 2026-11-13 pricing meeting): a label spanning the run of date columns that
+// fall inside a holiday, e.g. Thanksgiving. The travel days are the Holiday Planner own windows (the views it carries: the
+// next three holidays and the most recent one), so both tabs agree on which days belong to a holiday.
+var __pvHol=null, __pvHolTips=[];
+function pvHolidays(){
+  if(__pvHol)return __pvHol;
+  const d=(typeof hpData==='function')?hpData():null, out=[];
+  ((d&&d.views)||[]).forEach(v=>{const w=v&&v.window&&v.window.ty;if(w&&w[0]&&w[1])out.push({a:w[0],b:w[1],label:v.label||'Holiday',year:v.year});});
+  __pvHol=out;return out;
+}
+function pvHolTip(ev,i){
+  const tip=document.getElementById('od-tip');if(!tip||window.__odPinned)return;
+  const h=__pvHolTips[i];if(!h)return;
+  tip.classList.remove('hp-wide','hp-xwide');tip.innerHTML=h;tip.classList.add('show');posODTip(ev);
+}
+function pvHolBand(dateKeys){
+  const head=document.getElementById('pivotHead');if(!head||!head.parentNode)return;
+  const tbl=head.closest('table'), hs=pvHolidays();
+  let band=document.getElementById('pivotHolHead');
+  const hl=(dateKeys||[]).map(dk=>hs.find(x=>dk>=x.a&&dk<=x.b)||null);
+  if(!hl.some(Boolean)){if(band)band.remove();if(tbl)tbl.classList.remove('pv-has-hol');return;}
+  if(!band){band=document.createElement('tr');band.id='pivotHolHead';head.parentNode.insertBefore(band,head);}
+  __pvHolTips=[];
+  let h='<th class="s1 pv-hol-blank"></th><th class="s2 pv-hol-blank"></th><th class="s3 pv-hol-blank"></th>';
+  for(let i=0;i<hl.length;){
+    let j=i;while(j+1<hl.length&&hl[j+1]===hl[i])j++;
+    const x=hl[i], n=j-i+1;
+    if(x){
+      const k=__pvHolTips.length;
+      __pvHolTips.push(`<div class="od-head">${_hpEsc(x.label)} ${x.year||''}</div>`
+        +`<div style="font-size:11px;color:var(--text2)">Holiday travel ${_hpDay(x.a)} to ${_hpDay(x.b)}: the same days the Holiday Planner counts for it.</div>`);
+      h+=`<th class="pv-hol" colspan="${n}" onmouseenter="pvHolTip(event,${k})" onmousemove="posODTip(event)" onmouseleave="hideODTip()"><div class="pv-hol-t">${_hpEsc(x.label)}</div></th>`;
+    }else h+=`<th class="pv-hol-none" colspan="${n}"></th>`;
+    i=j+1;
+  }
+  band.innerHTML=h;
+  if(tbl){tbl.classList.add('pv-has-hol');
+    requestAnimationFrame(()=>{const bh=band.offsetHeight;if(bh>0)tbl.style.setProperty('--pv-hol-h',bh+'px');});}
+}
 function renderLoads(){
   const cap=parseInt(document.getElementById('cap').value)||54;
   const days=parseInt(document.getElementById('dateSlider').value)||8;
@@ -6233,7 +6297,7 @@ function renderLoads(){
         `<div class="dth-avg">${dayStats[dk].avgPct}%</div>`+
         `</th>`;
   });
-  head.innerHTML=hh;
+  head.innerHTML=hh;pvHolBand(dateKeys);
 
   // Render pivot body
   const body=document.getElementById('pivotBody');
@@ -10645,6 +10709,7 @@ function _hpBands(r){
 // into a surplus shows it (the older "add" trend clamps at 0 for the summary sums).
 function _hpGapSeries(r){
   const tr=r.ty&&r.ty.trend,out=[];if(!tr)return out;
+  if(tr.add){for(let i=0;i<__hpTD.length;i++){const a=tr.add[i];if(a!=null)out.push({d:__hpTD[i],v:a});}return out;}
   for(let i=0;i<__hpTD.length;i++){const n=tr.need[i],s=tr.sched[i];if(n!=null&&s!=null)out.push({d:__hpTD[i],v:n-s});}
   return out;
 }
@@ -10662,7 +10727,7 @@ function _hpSpark(pts,span){
     +`<circle cx="${x(vs.length-1).toFixed(1)}" cy="${y(vs[vs.length-1]).toFixed(1)}" r="2.2" fill="${col}"/></svg>`;
 }
 function _hpAddCell(key,hd,r,cls,span){
-  const T=r.ty||{},g=T.gap,pts=_hpGapSeries(r),bd=_hpBands(r);
+  const T=r.ty||{},g=T.gap,pts=_hpGapSeries(r),bd=r.__all?null:_hpBands(r);
   const fmt=v=>v>0?'+'+v:v<0?'&minus;'+(-v):'0';
   const cOf=v=>v==null?'var(--text3)':v>0?'var(--bad)':v<0?'var(--text3)':'var(--good)';
   let tip=`<div class="od-head">${hd} · buses to add</div>`;
@@ -10678,9 +10743,10 @@ function _hpAddCell(key,hd,r,cls,span){
     tip+=`<tr class="hp-tt-tot"><td>Whole day</td><td class="r">${T.buses_needed==null?'—':T.buses_needed}</td><td class="r">${_hpN(T.buses)}</td>`
       +`<td class="r" style="color:${cOf(g)}">${g==null?'—':fmt(g)}</td>${n>=2?'<td></td>':''}</tr></tbody></table>`;
     if(bd.unk)tip+=`<div style="color:var(--warn);font-size:11px">${bd.unk} scheduled bus(es) have no departure time, so they sit in no part of the day.</div>`;
-  }else tip+=`<div style="color:var(--text3)">No time-of-day split yet — nothing to go on for this day.</div>`;
+  }else if(r.__all)tip+=_hpAllAddTip(r);
+  else tip+=`<div style="color:var(--text3)">No time-of-day split yet — nothing to go on for this day.</div>`;
   // Owen 2026-10-05: the whole-day history only needs the To add figure, morning by morning, on one line.
-  const ws=_hpDaySeries(r).map(p=>(p.need!=null&&p.sched!=null)?p.need-p.sched:null).filter(v=>v!=null);
+  const ws=r.__all?_hpGapSeries(r).map(p=>p.v):_hpDaySeries(r).map(p=>(p.need!=null&&p.sched!=null)?p.need-p.sched:null).filter(v=>v!=null);
   if(ws.length>=2)tip+=`<div class="hp-tt-h">Whole day, To add, last ${ws.length} mornings</div><div>${ws.map((v,i)=>i===ws.length-1?`<b style="color:${cOf(v)}">${fmt(v)}</b>`:fmt(v)).join(' &rarr; ')}</div>`;
   return _hpHov(key,tip,cls,'white-space:nowrap')
     +`<span style="display:inline-flex;align-items:center;gap:6px">${_hpSpark(pts,span)}`
@@ -10770,6 +10836,82 @@ function hpPick(i){
   renderHoliday();
   const d=document.getElementById('hpCorBar');if(d&&d.scrollIntoView)d.scrollIntoView({behavior:'smooth',block:'start'});
 }
+// All travel (Owen 2026-11-13 pricing meeting): one more choice in Break down = every route and both directions added up,
+// travel day by travel day, so the tickets and revenue charts and the day table read for the whole company. Buses to add stays
+// the sum of each route direction own shortfall (a spare bus on one route does not cover another), like the Buses to add KPI.
+var HP_ALL='__all';
+function hpPickAll(){
+  const s=document.getElementById('hpCorSel');if(s)s.value=HP_ALL;
+  renderHoliday();
+  const d=document.getElementById('hpCorBar');if(d&&d.scrollIntoView)d.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function _hpDetailList(h,cur){
+  if(cur===HP_ALL)return [{c:_hpAllTravel(h),ci:h.corridors.length}];
+  return h.corridors.map((c,ci)=>({c,ci})).filter(o=>o.c.corridor===cur);
+}
+function _hpAllTravel(h){
+  if(h.__allc)return h.__allc;
+  const cs=h.corridors||[], rec=h.mode==='recap', nDays=cs.length?cs[0].days.length:0, nTD=(h.trend_dates||[]).length;
+  const LK=['trips','buses','people','no_shows','connections_in','revenue','buses_needed','at_same_point','rev_same'];
+  const TK=['trips','shut_off','buses','people','no_shows','connections_in','revenue','buses_needed','sold','rev_sold','dispatch_tix','projected','ly_to_come'];
+  const add=(o,k,v)=>{if(typeof v==='number')o[k]=(o[k]||0)+v;};
+  const rc=[0,0];let hasRc=false;
+  cs.forEach(c=>{const r=c.days[0],q=r&&r.ty&&r.ty.recent;if(q&&q.length===2){rc[0]+=q[0]||0;rc[1]+=q[1]||0;hasRc=true;}});
+  const days=[];
+  for(let i=0;i<nDays;i++){
+    const b=cs[0].days[i], L={date:b.ly&&b.ly.date,seats_per_bus:(b.ly&&b.ly.seats_per_bus)||54}, T={seats_per_bus:(b.ty&&b.ty.seats_per_bus)||54};
+    if(rec)T.date=b.ty&&b.ty.date;
+    let capL=0,capT=0,gap=null,anyTr=false;const by=[];
+    const tr={exp:[],need:[],sched:[],add:[]},has={e:[],n:[],s:[]};
+    for(let k=0;k<nTD;k++){tr.exp.push(0);tr.need.push(0);tr.sched.push(0);tr.add.push(0);has.e.push(false);has.n.push(false);has.s.push(true);}
+    cs.forEach(c=>{
+      const r=c.days[i];if(!r||!r.ly||!r.ty)return;
+      LK.forEach(k=>add(L,k,r.ly[k]));TK.forEach(k=>add(T,k,r.ty[k]));
+      capL+=(r.ly.buses||0)*(r.ly.seats_per_bus||54);capT+=(r.ty.buses||0)*(r.ty.seats_per_bus||54);
+      if(rec)return;
+      if(r.ty.gap!=null){gap=(gap||0)+Math.max(0,r.ty.gap);by.push({dir:c.direction,need:r.ty.buses_needed,sched:r.ty.buses,gap:r.ty.gap});}
+      const t=r.ty.trend;
+      for(let k=0;k<nTD;k++){
+        if(!t){has.s[k]=false;continue;}
+        anyTr=true;
+        const e=t.exp[k],nd=t.need[k],s=t.sched[k];
+        if(e!=null){tr.exp[k]+=e;has.e[k]=true;}
+        if(nd!=null){tr.need[k]+=nd;has.n[k]=true;}
+        if(s==null)has.s[k]=false;else{tr.sched[k]+=s;if(nd!=null)tr.add[k]+=Math.max(0,nd-s);}
+      }
+    });
+    L.load_pct=capL?Math.round(100*(L.people||0)/capL):null;
+    if(rec)T.load_pct=capT?Math.round(100*(T.people||0)/capT):null;
+    else{
+      T.gap=gap;T.by_route=by;
+      T.pace_pct=L.at_same_point?Math.round(100*(T.sold||0)/L.at_same_point):null;T.pace_blended_pct=T.pace_pct;
+      T.recent_pct=T.ly_to_come?Math.round(100*((T.projected||0)-(T.sold||0))/T.ly_to_come):100;
+      if(hasRc)T.recent=rc.slice();
+      if(anyTr)T.trend={exp:tr.exp.map((v,k)=>has.e[k]?v:null),need:tr.need.map((v,k)=>has.n[k]?v:null),
+        sched:tr.sched.map((v,k)=>has.s[k]?v:null),add:tr.add.map((v,k)=>has.s[k]?v:null)};
+    }
+    days.push({date:b.date,dow:b.dow,offset:b.offset,days_out:b.days_out,ly:L,ty:T,__all:true});
+  }
+  const curve=key=>{const out={ly:{},ty:{}};let any=false;
+    cs.forEach(c=>{const s=c[key];if(!s)return;any=true;['ly','ty'].forEach(y=>{const o=s[y]||{};for(const k in o)out[y][k]=(out[y][k]||0)+o[k];});});
+    return any?out:null;};
+  // whole-holiday seat capacity the way the company-wide total row counts it (each route: its buses x its seats per bus),
+  // so the All travel total row reads the same Load as the summary
+  let lyCap=0,lyCapR=0,tyCapR=0;
+  cs.forEach(c=>{const d=c.days,sl=(d[0]&&d[0].ly.seats_per_bus)||54,st=(d[0]&&d[0].ty.seats_per_bus)||54;
+    lyCap+=_hpSum(d,'ly','buses')*sl;lyCapR+=_hpSum(d,'ly','buses')*st;tyCapR+=_hpSum(d,'ty','buses')*st;});
+  h.__allc={corridor:HP_ALL,direction:'All travel · every route, both directions',section:'Company-wide',days,
+    curve:curve('curve'),curve_rev:curve('curve_rev'),__all:true,nRoutes:cs.length,lyCap,lyCapR,tyCapR};
+  return h.__allc;
+}
+// Buses to add hover for one All travel day: the route directions short of buses that day.
+function _hpAllAddTip(r){
+  const by=((r.ty&&r.ty.by_route)||[]).filter(x=>x.gap>0).sort((a,b)=>b.gap-a.gap);
+  if(!by.length)return `<div style="color:var(--text3)">No route is short of buses this day.</div>`;
+  return `<table class="hp-tt"><thead><tr><th>Route direction</th><th class="r">Needed</th><th class="r">Scheduled</th><th class="r">To add</th></tr></thead><tbody>`
+    +by.map(x=>`<tr><td>${_hpEsc(x.dir)}</td><td class="r">${x.need==null?'—':x.need}</td><td class="r">${_hpN(x.sched)}</td><td class="r"><b style="color:var(--bad)">+${x.gap}</b></td></tr>`).join('')
+    +`</tbody></table><div class="od-foot" style="margin-top:0">All travel adds up each route direction shortfall: a spare bus on one route cannot cover a missing one on another.</div>`;
+}
 function hpSetView(i){__hpView=i;renderHoliday();}
 
 // The holiday buttons top left (Owen 2026-09-16), then company-wide numbers, then the summary of every
@@ -10815,9 +10957,9 @@ function renderHoliday(){
   secs.forEach(([,cs])=>cs.forEach(c=>{if(__hpCors.indexOf(c.corridor)<0)__hpCors.push(c.corridor);}));
   if(sel){
     const prev=sel.value;
-    sel.innerHTML=secs.map(([s,cs])=>{const names=[...new Set(cs.map(c=>c.corridor))];
+    sel.innerHTML=`<optgroup label="Company-wide"><option value="${HP_ALL}">All travel · every route, both directions</option></optgroup>`+secs.map(([s,cs])=>{const names=[...new Set(cs.map(c=>c.corridor))];
       return `<optgroup label="${_hpEsc(s)}">`+names.map(n=>`<option value="${_hpEsc(n)}">${_hpEsc(n)}</option>`).join('')+'</optgroup>';}).join('');
-    sel.value=__hpCors.indexOf(prev)>=0?prev:__hpCors[0];
+    sel.value=(prev===HP_ALL||__hpCors.indexOf(prev)>=0)?prev:__hpCors[0];
   }
   const cur=(sel&&sel.value)||__hpCors[0];
   __hpBreak={};__hpStops={};
@@ -10830,6 +10972,7 @@ function renderHoliday(){
     +`<div style="padding:12px 16px;font-size:12px;color:var(--text2);line-height:1.65">`
     +`<div><b>Every route is included</b>, so the numbers at the top are company-wide: ${secLine}. Main-corridor trips are placed by the stops they served, so trips regrouped since last year still compare like for like; college and other routes are placed by the revenue report's route group.</div>`
     +`<div>Travel days line up by weekday around each year's holiday (${_hpDay(v.window.ly[0])}, ${v.ly_year} lines up with ${_hpDay(v.window.ty[0])}, ${v.year})${v.holiday==='christmas'?'; Christmas & New Year lines up by calendar date, Dec 23 – Jan 4':''}.</div>`
+    +`<div><b>All travel</b> (first in Break down, or click the company-wide total row) adds every route and direction together, travel day by travel day; its Buses to add is each route direction shortfall added up, like the Buses to add number at the top.</div>`
     +`<div><b>Needed</b> = people ÷ seats per bus, rounded up, for each day and direction. 78 people on 3 buses needed 2.</div>`
     +`<div><b>Buses went</b> come from the bus number on each ticket, because dispatch data only starts June 2026. Checked against dispatch on Labor Day 2026, 97% of trips match exactly.</div>`
     +(v.mode==='recap'
@@ -10849,7 +10992,7 @@ function _hpRenderPlanner(h,secs,cur){
   const tot=c=>{
     const d=c.days, seats=(d[0]&&d[0].ly.seats_per_bus)||54;
     const t={seats,people:_hpSum(d,'ly','people'),lyBuses:_hpSum(d,'ly','buses'),lyNeed:_hpSum(d,'ly','buses_needed'),
-      lyCap:_hpSum(d,'ly','buses')*seats,sold:_hpSum(d,'ty','sold'),same:_hpSum(d,'ly','at_same_point'),proj:_hpSum(d,'ty','projected'),
+      lyCap:c.__all?c.lyCap:_hpSum(d,'ly','buses')*seats,sold:_hpSum(d,'ty','sold'),same:_hpSum(d,'ly','at_same_point'),proj:_hpSum(d,'ty','projected'),
       need:_hpSum(d,'ty','buses_needed'),sched:_hpSum(d,'ty','buses'),
       rev:_hpSum(d,'ty','rev_sold'),revSame:_hpSum(d,'ly','rev_same'),lyRev:_hpSum(d,'ly','revenue'),
       // Shortfalls summed per day: a spare bus on Friday cannot cover a missing one on Sunday.
@@ -10922,7 +11065,7 @@ function _hpRenderPlanner(h,secs,cur){
   // Company-wide total: each number breaks down by section.
   const secTip=(title,k,fmt)=>`<div class="od-head">All routes · ${title}</div>`
     +secs.map(([s])=>_hpLine(_hpEsc(s),fmt(secTot[s][k]))).join('')+`<div class="od-foot">Company-wide: ${fmt(all[k])}</div>`;
-  const totalRow=`<tr class="hp-total"><td>All routes · company-wide</td>`
+  const totalRow=`<tr class="hp-total ov-row-link" onclick="hpPickAll()"><td>All routes · company-wide</td>`
     +_hpHov('T|people',secTip(`people who traveled, ${lyY}`,'people',_hpPeople),LY)+`${_hpN(all.people)}</td>`
     +_hpHov('T|buses',secTip(`buses that went, ${lyY}`,'lyBuses',_hpBuses),LY)+`${_hpN(all.lyBuses)}</td>`
     +_hpHov('T|need',secTip(`buses needed at optimal capacity, ${lyY}`,'lyNeed',_hpBuses),LY)+`${_hpN(all.lyNeed)}</td>`
@@ -10950,7 +11093,7 @@ function _hpRenderPlanner(h,secs,cur){
     +`<th class="${TY}">Expected final</th><th class="${TY}">Buses scheduled</th><th class="${TY}">Buses to add</th></tr></thead>`
     +`<tbody>${body}</tbody><tfoot>${totalRow}</tfoot>`;
 
-  det.innerHTML=h.corridors.map((c,ci)=>({c,ci})).filter(o=>o.c.corridor===cur).map(({c,ci})=>{
+  det.innerHTML=_hpDetailList(h,cur).map(({c,ci})=>{
     const seats=(c.days[0]&&c.days[0].ly.seats_per_bus)||54, c0=c;
     // one vertical span for every sparkline in this table (min 4 buses, so a 1-bus wiggle stays flat)
     const span=Math.max(4,...c.days.map(r=>{const v=_hpGapSeries(r).map(p=>p.v);return v.length?Math.max(...v)-Math.min(...v):0;}));
@@ -10989,7 +11132,7 @@ function _hpRenderPlanner(h,secs,cur){
       +`<td class="${TY}">${_hpN(tt.proj)}</td><td class="${TY}">${_hpN(tt.need)}</td>`
       +`<td class="${TY}" data-tip="Each day's shortfall added up, as in the summary: a spare bus on one day does not cover a missing one on another" style="${tt.short>0?'color:var(--bad);font-weight:800':'color:var(--good);font-weight:700'}">${tt.short>0?'+'+tt.short:'0'}</td></tr>`;
     return `<div class="ov-panel" style="margin-bottom:18px">`
-      +`<div class="ov-panel-head"><div class="ov-panel-title">${_hpEsc(c.direction)}</div><span style="font-size:10px;color:var(--text3)">${seats} seats per bus</span></div>`
+      +`<div class="ov-panel-head"><div class="ov-panel-title">${_hpEsc(c.direction)}</div><span style="font-size:10px;color:var(--text3)">${c.__all?c.nRoutes+' route directions added up, travel day by travel day':seats+' seats per bus'}</span></div>`
       +`<div style="padding:10px 14px 4px"><div class="hp-charts"><div class="hp-chart"><div class="hp-chart-t">Tickets sold</div>${hpCurve(c,dOut,{key:'t'+ci,ly:String(lyY),ty:String(tyY),basis:h.curve_basis,first:h.window.ty[0],lyFirst:h.window.ly[0]})}<div class="hp-legend"><b>━ ${lyY}</b> &nbsp; <b style="color:var(--green2)">━ ${tyY}</b> &nbsp; cumulative tickets${h.curve_basis==='first_travel_day'?' before the first travel day ('+_hpDay(h.window.ty[0])+'), both years counted to the same day':' by days before travel'}</div></div><div class="hp-chart"><div class="hp-chart-t">Revenue</div>${hpCurve(c,dOut,{rev:true,key:'r'+ci,ly:String(lyY),ty:String(tyY),basis:h.curve_basis,first:h.window.ty[0],lyFirst:h.window.ly[0]})}<div class="hp-legend"><b>━ ${lyY}</b> &nbsp; <b style="color:var(--green2)">━ ${tyY}</b> &nbsp; cumulative revenue${h.curve_basis==='first_travel_day'?' before the first travel day ('+_hpDay(h.window.ty[0])+'), both years counted to the same day':' by days before travel'}, every ticket on these trips</div></div></div></div>`
       +`<div class="table-wrap" style="border:none;border-radius:0"><table class="dt"><thead>`
       +`<tr><th rowspan="2">Travel day</th><th colspan="5" class="hp-grp ${LY}">Last year · ${lab} ${lyY}</th><th colspan="9" class="hp-grp ${TY1}">This year · ${lab} ${tyY}</th></tr>`
@@ -11021,7 +11164,7 @@ function _hpRenderRecap(h,secs,cur){
       // Extra buses: per day, buses that went beyond what that day's riders needed at full capacity.
       lyX:d.reduce((a,r)=>a+Math.max(0,r.ly.buses-r.ly.buses_needed),0),
       tyX:d.reduce((a,r)=>a+Math.max(0,r.ty.buses-r.ty.buses_needed),0)};
-    t.lyCap=t.lyB*seats; t.tyCap=t.tyB*seats;
+    t.lyCap=c.__all?c.lyCapR:t.lyB*seats; t.tyCap=c.__all?c.tyCapR:t.tyB*seats;
     return t;
   };
   const load=(p,cap)=>cap?Math.round(100*p/cap):null;
@@ -11105,14 +11248,14 @@ function _hpRenderRecap(h,secs,cur){
   const TT={people:secTip(`people who traveled, ${tyY}`,'tyP',_hpPeople),buses:secTip(`buses that went, ${tyY}`,'tyB',_hpBuses),
             need:secTip(`buses needed at optimal capacity, ${tyY}`,'tyN',_hpBuses),extra:secTip(`extra buses run, ${tyY}`,'tyX',_hpBuses),
             rev:secTip(`revenue, ${tyY}`,'tyR',_hpMoney),avg:secAvg(tyY,'tyR','tyP')};
-  const totalRow=`<tr class="hp-total"><td>All routes · company-wide</td>`+cells('T',A,TL,TT)+'</tr>';
+  const totalRow=`<tr class="hp-total ov-row-link" onclick="hpPickAll()"><td>All routes · company-wide</td>`+cells('T',A,TL,TT)+'</tr>';
   const grp=(label,n)=>`<th colspan="${n}" class="hp-grp hp-sep">${label}</th>`;
   const yrs=`<th class="${LY}">${lyY}</th><th class="${TY}">${tyY}</th>`;
   sum.innerHTML=`<thead><tr><th rowspan="2">Direction</th>${grp('People',3)}${grp('Revenue',3)}${grp('Avg fare',3)}${grp('Buses went',3)}${grp('Needed at full capacity',2)}${grp('Load',3)}${grp('Extra buses',2)}</tr>`
     +`<tr>${yrs}<th class="${TY}" data-tip="People ${tyY} vs ${lyY}">Change</th>${yrs}<th class="${TY}" data-tip="Revenue ${tyY} vs ${lyY}">Change</th>${yrs}<th class="${TY}" data-tip="Average fare ${tyY} vs ${lyY}">Change</th>${yrs}<th class="${TY}" data-tip="Buses that went ${tyY} vs ${lyY}">Change</th>${yrs}${yrs}<th class="${TY}" data-tip="Load ${tyY} minus ${lyY}, in percentage points">Change</th>${yrs}</tr></thead>`
     +`<tbody>${body}</tbody><tfoot>${totalRow}</tfoot>`;
 
-  det.innerHTML=h.corridors.map((c,ci)=>({c,ci})).filter(o=>o.c.corridor===cur).map(({c,ci})=>{
+  det.innerHTML=_hpDetailList(h,cur).map(({c,ci})=>{
     const seats=(c.days[0]&&c.days[0].ty.seats_per_bus)||54;
     const rows=c.days.map((r,i)=>{
       const L=r.ly,T=r.ty,kL='r'+ci+'|'+i+'|ly',kT='r'+ci+'|'+i+'|ty';
@@ -11141,7 +11284,7 @@ function _hpRenderRecap(h,secs,cur){
       +`<td class="${TY}" style="font-weight:700;color:${chgColA(avgOf(tt.tyR,tt.tyP),avgOf(tt.lyR,tt.lyP))}">${chgA(avgOf(tt.tyR,tt.tyP),avgOf(tt.lyR,tt.lyP))}</td>`
       +`<td class="${LY}">${_hpN(tt.lyN)}</td><td class="${TY}">${_hpN(tt.tyN)}</td>${_hpLoad(load(tt.lyP,tt.lyCap),LY)}${_hpLoad(load(tt.tyP,tt.tyCap),TY)}${loadChg(load(tt.tyP,tt.tyCap),load(tt.lyP,tt.lyCap))}</tr>`;
     return `<div class="ov-panel" style="margin-bottom:18px">`
-      +`<div class="ov-panel-head"><div class="ov-panel-title">${_hpEsc(c.direction)}</div><span style="font-size:10px;color:var(--text3)">${seats} seats per bus</span></div>`
+      +`<div class="ov-panel-head"><div class="ov-panel-title">${_hpEsc(c.direction)}</div><span style="font-size:10px;color:var(--text3)">${c.__all?c.nRoutes+' route directions added up, travel day by travel day':seats+' seats per bus'}</span></div>`
       +`<div style="padding:10px 14px 4px"><div class="hp-charts"><div class="hp-chart"><div class="hp-chart-t">Tickets sold</div>${hpCurve(c,-1,{done:true,key:'t'+'x'+ci,ly:String(lyY),ty:String(tyY),basis:h.curve_basis,first:h.window.ty[0],lyFirst:h.window.ly[0]})}<div class="hp-legend"><b>━ ${lyY}</b> &nbsp; <b style="color:var(--green2)">━ ${tyY}</b> &nbsp; cumulative tickets${h.curve_basis==='first_travel_day'?' before the first travel day ('+_hpDay(h.window.ty[0])+'), both years counted to the same day':' by days before travel'}</div></div><div class="hp-chart"><div class="hp-chart-t">Revenue</div>${hpCurve(c,-1,{done:true,rev:true,key:'r'+'x'+ci,ly:String(lyY),ty:String(tyY),basis:h.curve_basis,first:h.window.ty[0],lyFirst:h.window.ly[0]})}<div class="hp-legend"><b>━ ${lyY}</b> &nbsp; <b style="color:var(--green2)">━ ${tyY}</b> &nbsp; cumulative revenue${h.curve_basis==='first_travel_day'?' before the first travel day ('+_hpDay(h.window.ty[0])+'), both years counted to the same day':' by days before travel'}, every ticket on these trips</div></div></div></div>`
       +`<div class="table-wrap" style="border:none;border-radius:0"><table class="dt"><thead>`
       +`<tr><th rowspan="2">Travel day</th>${grp('Trips',2)}${grp('Buses went',3)}${grp('People',3)}${grp('Revenue',3)}${grp('Avg fare',3)}${grp('Needed',2)}${grp('Load',3)}</tr>`
