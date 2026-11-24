@@ -6,6 +6,12 @@
 //   GET /api/q?legs=YYYY-MM-DD&to=YYYY-MM-DD   stop-by-stop dispatch detail of DEPARTED trips (pricing.trip_legs, written by
 //                                              Scripts/legs_to_supabase.py), at most 31 days: {from, to, trips:{date:{sched:trip}},
 //                                              read:{date: newest read time}}. Counts, stop names, times and seats only.
+//   GET /api/q?holidays=1                      the holidays the Holiday tab shows (pricing.holiday_list())
+//   GET /api/q?holiday=NAME&year=YYYY          everything for one holiday (pricing.holiday_data, migration 005): window,
+//                                              trips + tickets per sale day both years, dispatch snapshots, prices now; a
+//                                              finished holiday's results view. The page works the planner out of it.
+//                                              Passed through as the database built it (no parsing here: the free plan
+//                                              allows very little CPU per request).
 import { accessUser } from "./data.js";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -63,6 +69,28 @@ export async function onRequestGet({ request, env }) {
       if (!read[x.dep_date] || String(x.read_at) > read[x.dep_date]) read[x.dep_date] = String(x.read_at);
     }
     return out({ from, to, trips, read }, 200, "private, max-age=300");
+  }
+  if (q.has("holidays") || q.has("holiday")) {
+    let fn, body;
+    if (q.has("holiday")) {
+      const name = q.get("holiday") || "", year = q.get("year") || "";
+      if (!/^[a-z_]{2,40}$/.test(name) || !/^20\d\d$/.test(year)) return out({ error: "bad holiday" }, 400);
+      fn = "holiday_data"; body = JSON.stringify({ p_holiday: name, p_year: +year });
+    } else {
+      fn = "holiday_list"; body = "{}";
+    }
+    let r;
+    try {
+      r = await fetch(env.SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/rpc/" + fn, {
+        method: "POST", body,
+        headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: "Bearer " + env.SUPABASE_SERVICE_KEY,
+                   "Content-Type": "application/json", "Content-Profile": "pricing", "Accept-Profile": "pricing" },
+      });
+    } catch (e) {
+      return out({ error: "database unavailable" }, 502);
+    }
+    if (!r.ok) return out({ error: "database unavailable" }, 502);
+    return new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=120" } });
   }
   return out({ error: "unknown query" }, 400);
 }
