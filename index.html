@@ -494,6 +494,34 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 #od-tip .dl-bus{font-size:10px;color:var(--text2);margin-top:2px;}
 #od-tip .dl-bus.c{color:var(--text3);}
 #od-tip .dl-sub{margin-top:5px;padding-top:4px;border-top:1px dashed var(--border);}
+/* Compact hover box (Owen 2026-11-23 "too much clutter"): dlCompactHtml */
+#od-tip .dc-head{font-weight:700;color:var(--green2);font-size:12px;margin-bottom:3px;}
+#od-tip .dc-head span{color:var(--text3);font-weight:600;}
+#od-tip .dc-verd{font-size:11px;color:var(--text);margin:1px 0;}
+#od-tip .dc-verd b.f{color:var(--bad);}
+#od-tip .dc-proj{font-size:11px;color:var(--text2);margin:1px 0 0;}
+#od-tip .dc-proj b.s{color:var(--bad);}
+#od-tip .dc-proj span{color:var(--text3);}
+#od-tip .dc-rows{display:grid;grid-template-columns:auto auto 1fr 84px auto;column-gap:6px;row-gap:3px;align-items:center;font-size:11px;margin-top:6px;}
+#od-tip .dc-t{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);white-space:nowrap;text-align:right;}
+#od-tip .dc-n{font-weight:600;color:var(--text);white-space:nowrap;}
+#od-tip .dc-io{font-size:10px;color:var(--text2);}
+#od-tip .dc-io i{font-style:normal;color:var(--text3);}
+#od-tip .dc-bar{display:flex;gap:1px;height:9px;}
+#od-tip .dc-seg{position:relative;height:9px;background:var(--border2);border-radius:2px;overflow:hidden;min-width:3px;}
+#od-tip .dc-seg i{position:absolute;left:0;top:0;bottom:0;background:var(--green2);}
+#od-tip .dc-seg.tight i{background:var(--warn);}
+#od-tip .dc-seg.full i{background:var(--bad);}
+#od-tip .dc-l{font-size:10px;color:var(--text2);white-space:nowrap;text-align:right;}
+#od-tip .dc-l.f{color:var(--bad);font-weight:700;}
+#od-tip .dc-l.b{color:var(--warn);font-weight:700;}
+#od-tip .dc-io span{white-space:nowrap;}
+#od-tip .dc-riders{margin-top:6px;padding-top:5px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text2);line-height:1.45;}
+#od-tip .dc-riders b{color:var(--text);font-weight:600;}
+#od-tip .dc-riders .n{color:var(--text);font-weight:600;}
+#od-tip .dc-riders .x{color:var(--bad);font-weight:700;}
+#od-tip .dc-riders .fare{color:var(--text3);}
+#od-tip .dc-foot{margin-top:5px;padding-top:4px;border-top:1px solid var(--border);font-size:10px;color:var(--text3);}
 
 #od-tip table.od-tt{border-collapse:collapse;width:100%;font-size:11px;margin:0 0 2px}
 #od-tip table.od-tt th{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);font-weight:700;text-align:left;padding:2px 8px 4px 0;border-bottom:1px solid var(--border2);white-space:nowrap;vertical-align:bottom}
@@ -5464,6 +5492,25 @@ body{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <!-- <<INJECT_DATA>> -->
 <script>
 
@@ -6508,6 +6555,132 @@ function hpTripProjHtml(hy,tix,cap,pt){
     +pt.pts.map(p=>p.tix).join(' &rarr; ')+'</span></div>';
   return h;
 }
+// == Compact hover box (Owen 2026-11-23: "too much clutter ... best understand the story of the bus") ==
+// For a trip in pp-dcclegs: answer first (what is full, what is still open from each stop, seats short at departure), then one
+// row per stop with the bar for the stretch leaving it (split by bus), then who rides from where, then one summary line.
+// One count (dispatch). Trips not in the file keep the older box. UI text has no apostrophes on purpose.
+function dlShortNames(D){
+  const base=n=>{n=String(n||'');
+    let m=n.match(/^Logan International Airport \(Terminal ([^)]*)\)/i);if(m)return 'Logan '+m[1];
+    if(/white marsh/i.test(n))return 'White Marsh';
+    if(/^Boston \(Logan/i.test(n))return 'Logan Airport';
+    if(/^Boston \(South Station\)/i.test(n))return 'South Station';
+    return n.replace(/\s*\([^)]*\)\s*$/,'').trim()||n;};
+  const names=[...new Set(D.stops.map(s=>s.n))], sh={}, cnt={};
+  names.forEach(n=>{sh[n]=base(n);cnt[sh[n]]=(cnt[sh[n]]||0)+1;});
+  // two different stops with the same short name on this trip (Providence Downtown / Bus Terminal): keep a qualifier
+  names.forEach(n=>{if(cnt[base(n)]>1){const q=((String(n).match(/\(([^)]*)\)/)||[])[1]||'').replace(/^Bus Terminal$/,'Terminal');
+    if(q)sh[n]=base(n).replace(/^Providence$/,'Prov')+' '+q;}});
+  return sh;
+}
+// Dispatch stop for a manifest stop name, from position `from` on: same letters first, else contains; of several (Providence
+// Downtown / Terminal, Amherst Center / UMass) the one where most riders get on (boarding) or off (alighting).
+function dlMatch(D,name,from,alight){
+  const k=_dlKey(stopNorm(name));if(!k)return -1;
+  const ex=[],co=[];
+  for(let i=from||0;i<D.stops.length;i++){const d=_dlKey(D.stops[i].n);if(!d)continue;if(d===k)ex.push(i);else if(d.indexOf(k)>=0||k.indexOf(d)>=0)co.push(i);}
+  const c=ex.length?ex:co;if(!c.length)return -1;
+  let best=c[0];
+  c.forEach(i=>{const v=alight?D.stops[i].off:D.stops[i].on, b=alight?D.stops[best].off:D.stops[best].on;if(v>b)best=i;});
+  return best;
+}
+function _dlWhen(D){
+  if(!D.built)return '';
+  const w=new Date(D.built);if(isNaN(w))return '';
+  const td=new Date();
+  return (w.toDateString()===td.toDateString()?'':w.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' ')+w.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+}
+function dlCompactHtml(sched,iso,D,entries,x){
+  x=x||{};
+  const sh=dlShortNames(D), last=D.stops.length-1, nm=i=>_stopEsc(sh[D.stops[i].n]||D.stops[i].n);
+  const run=D.buses.filter(b=>b.st!=='C'), nc=D.buses.length-run.length;
+  const tix=run.reduce((s,b)=>s+(b.tix||0),0);
+  const day=new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'numeric',day:'numeric'}).replace(',','');
+  let h='<div class="dc-head">'+_stopEsc(sched)+' &middot; '+day+' &middot; '+_dlTime(D.stops[0].dep||D.stops[0].arr)+' '+nm(0)+' &rarr; '+nm(last)
+    +' <span>&middot; '+run.length+' bus'+(run.length===1?'':'es')+(nc?', '+nc+' cancelled':'')
+    +(D.st==='S'?' &middot; suspended':D.st==='C'?' &middot; cancelled':'')+'</span></div>';
+  // full stretches (seats of the buses that run them) and what is still open from each boarding stop
+  const full=D.legs.map(L=>L.seats>0&&L.left<=0);
+  const runs=[];
+  full.forEach((f,i)=>{if(!f)return;const r=runs[runs.length-1];if(r&&r[1]===i)r[1]=i+1;else runs.push([i,i+1]);});
+  const open=[];
+  for(let i=0;i<last&&open.length<4;i++){
+    if(!(i===0||D.stops[i].on>0))continue;
+    let j=i,n=Infinity;
+    while(j<last&&!full[j]){n=Math.min(n,D.legs[j].left);j++;}
+    if(j===i||!(n>0))continue;
+    open.push(j===last?'from '+nm(i)+' '+n:nm(i)+' &rarr; '+nm(j)+' '+n);
+  }
+  if(runs.length){
+    h+='<div class="dc-verd"><b class="f">FULL</b> '+runs.map(r=>nm(r[0])+' &rarr; '+nm(r[1])).join(', ')
+      +' &middot; '+(open.length?'open: '+open.join(' &middot; '):'nothing open')+'</div>';
+  } else {
+    let k=-1;D.legs.forEach((L,i)=>{if(L.seats>0&&(k<0||L.on/L.seats>D.legs[k].on/D.legs[k].seats))k=i;});
+    h+='<div class="dc-verd">Room on every stretch'+(k>=0?' &middot; fullest '+nm(k)+' &rarr; '+nm(k+1)+' '+D.legs[k].left+' left':'')+'</div>';
+  }
+  // outlook at departure: on board now x the ratio (Holiday Planner day ratio, else the booking-curve projection / tickets)
+  const n0=new Date(), todayISO=n0.getFullYear()+'-'+String(n0.getMonth()+1).padStart(2,'0')+'-'+String(n0.getDate()).padStart(2,'0');
+  let r=null,lab='';
+  if(x.hy&&x.hy.r>0){r=x.hy.r;lab='Holiday';}
+  else if(x.pt&&x.pt.now&&x.pt.now.tix>0&&x.pt.now.proj>0){r=x.pt.now.proj/x.pt.now.tix;lab='Projected';}
+  if(r&&iso>todayISO&&tix>=10){
+    let best=null;
+    D.legs.forEach((L,i)=>{if(!L.seats)return;const w=Math.round(L.on*r),s=w-L.seats;if(!best||s>best.s)best={i:i,w:w,s:s,seats:L.seats};});
+    if(best)h+='<div class="dc-proj">'+lab+': '+(best.s>0?'<b class="s">short '+best.s+' seat'+(best.s===1?'':'s')+'</b> '+nm(best.i)+' &rarr; '+nm(best.i+1)
+      :'fits &middot; fullest '+nm(best.i)+' &rarr; '+nm(best.i+1)+' about '+best.w+' of '+best.seats)+' <span>(x'+r.toFixed(2)+')</span></div>';
+  }
+  // one row per stop + the bar for the stretch leaving it
+  const starts={},ends={};
+  run.forEach(b=>{if(b.a>0)(starts[b.a]=starts[b.a]||[]).push(b.n);if(b.z<last)(ends[b.z]=ends[b.z]||[]).push(b.n);});
+  const ms=D.maxSeats||1;
+  let rows='';
+  D.stops.forEach((s,i)=>{
+    const isLast=i===last, t=isLast?(s.arr||s.dep):(s.dep||s.arr);
+    // each phrase kept on one line (the column wraps between phrases, never inside one)
+    const io=[];if(s.on)io.push('+'+s.on);if(s.off)io.push('&minus;'+s.off);
+    const tr=[];if(s.tin)tr.push(s.tin+' in');if(s.tout)tr.push(s.tout+' out');
+    const parts=[];if(io.length)parts.push('<span>'+io.join(' ')+'</span>');
+    if(tr.length)parts.push('<span><i>transfer '+tr.join(', ')+'</i></span>');
+    if(starts[i])parts.push('<span><i>bus '+starts[i].join(', ')+' starts</i></span>');
+    if(ends[i])parts.push('<span><i>bus '+ends[i].join(', ')+' ends</i></span>');
+    const txt=parts.join(' <i>&middot;</i> ');
+    let bar='<span></span>',lb='<span></span>';
+    if(!isLast){
+      const L=D.legs[i], segs=run.filter(b=>b.ob[i]!=null);
+      const fullBus=segs.filter(b=>b.seats>0&&(+b.ob[i]||0)>=b.seats).map(b=>b.n);
+      bar='<div class="dc-bar" style="width:'+Math.max(10,Math.round(L.seats/ms*100))+'%">'+segs.map(b=>{
+        const o=+b.ob[i]||0, f=b.seats?Math.min(100,Math.round(o/b.seats*100)):0, left=b.seats-o;
+        return '<div class="dc-seg'+(left<=0?' full':left<=5?' tight':'')+'" style="flex:'+(b.seats||1)+'"><i style="width:'+f+'%"></i></div>';}).join('')+'</div>';
+      // a full bus on a stretch with room on another: the label turns amber, the bar shows which bus
+      lb='<span class="dc-l'+(full[i]?' f':(fullBus.length&&segs.length>1?' b':''))+'">'+(L.seats?L.on+'/'+L.seats+(full[i]?' FULL':''):'no bus')+'</span>';
+    }
+    rows+='<span class="dc-t">'+_dlTime(t)+'</span><span class="dc-n">'+nm(i)+'</span><span class="dc-io">'+txt+'</span>'+bar+lb;
+  });
+  h+='<div class="dc-rows">'+rows+'</div>';
+  // who rides from where (manifest pairs): red count = the pair rides through a FULL stretch
+  const groups={},order=[];
+  const thruFull=(a,b)=>{for(let k=a;k<b;k++)if(full[k])return true;return false;};
+  (entries||[]).forEach(e=>{
+    const a=dlMatch(D,e.from,0,false), b=a>=0?dlMatch(D,e.to,a+1,true):-1;
+    const gk=a>=0?'i'+a:'n'+e.from;
+    if(!groups[gk]){groups[gk]={a:a,name:a>=0?nm(a):_stopEsc(e.from),items:[]};order.push(gk);}
+    const c=+e.count||0;
+    groups[gk].items.push({b:b,name:b>=0?nm(b):_stopEsc(e.to),n:c,fare:c?Math.round((+e.v||0)/c):0,x:a>=0&&b>a&&thruFull(a,b)});
+  });
+  if(order.length){
+    order.sort((p,q)=>(groups[p].a<0?999:groups[p].a)-(groups[q].a<0?999:groups[q].a));
+    h+='<div class="dc-riders">'+order.map(gk=>{const g=groups[gk];
+      g.items.sort((p,q)=>(p.b<0?999:p.b)-(q.b<0?999:q.b));
+      return '<div><b>'+g.name+':</b> '+g.items.map(it=>it.name+' <span class="'+(it.x?'x':'n')+'">'+it.n+'</span>'+(it.fare?' <span class="fare">$'+it.fare+'</span>':'')).join(' &middot; ')+'</div>';
+    }).join('')+'</div>';
+  }
+  const ft=[tix+' tickets'];
+  if(x.pace&&x.pace.deltas&&x.pace.deltas.length)ft.push('daily '+x.pace.deltas.map(d=>(d>=0?'+':'')+d).join(' '));
+  if(x.rev&&x.rev.mi>0)ft.push('$'+x.rev.rev.toLocaleString()+' &middot; $'+(x.rev.rev/x.rev.mi).toFixed(2)+'/mi');
+  const wh=_dlWhen(D);if(wh)ft.push('dispatch '+wh);
+  h+='<div class="dc-foot">'+ft.join(' &middot; ')+'</div>';
+  return h;
+}
 function odFor(sched,iso){
   const k=String(sched).trim()+'|'+isoToMDYY(iso);
   return (window.manifestOD&&window.manifestOD[k])||odHist()[k]||null;
@@ -6861,7 +7034,13 @@ function showODTip(ev,sched,dateISO){
       +'<span style="font-family:monospace;color:var(--text2)">'+_seq+'</span> '
       +'<span style="color:'+_dCol+';font-weight:700;font-size:13px">'+_dLab+'</span></div>';
   }
+  // 2026-11-23 (Owen): compact box for a trip with dispatch detail; the older box for the rest.
+  if(_dl){
+    tip.innerHTML=dlCompactHtml(sched.trim(),dateISO,_dl,entries,{pace:pace,pt:_pt,hy:_hy,
+      rev:(_trev>0&&_effMiles>0)?{rev:Math.round(_trev),mi:Math.round(_effMiles)}:null});
+  } else {
   tip.innerHTML=`<div class="od-head">Sched ${sched.trim()} &middot; ${isoToMDYY(dateISO)}</div>${rows}<div class="od-foot">${maxLine}${paceLine}${revLine}${projLine}</div>`;
+  }
   tip.classList.add('show');posODTip(ev);
 }
 function posODTip(ev){
