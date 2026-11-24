@@ -7,7 +7,9 @@
 //                                              Scripts/legs_to_supabase.py), at most 31 days: {from, to, trips:{date:{sched:trip}},
 //                                              read:{date: newest read time}}. Counts, stop names, times and seats only.
 //   GET /api/q?holidays=1                      the holidays the Holiday tab shows (pricing.holiday_list())
-//   GET /api/q?holiday=NAME&year=YYYY          everything for one holiday (pricing.holiday_data, migration 005): window,
+//   GET /api/q?holiday=NAME&year=YYYY          everything for one holiday: the answer Scripts/holiday_db.py stored after its
+//                                              last load (Storage pricing-page/holiday/NAME_YEAR.json), else pricing.holiday_data
+//                                              (migration 005) asked directly. Window,
 //                                              trips + tickets per sale day both years, dispatch snapshots, prices now; a
 //                                              finished holiday's results view. The page works the planner out of it.
 //                                              Passed through as the database built it (no parsing here: the free plan
@@ -76,6 +78,14 @@ export async function onRequestGet({ request, env }) {
       const name = q.get("holiday") || "", year = q.get("year") || "";
       if (!/^[a-z_]{2,40}$/.test(name) || !/^20\d\d$/.test(year)) return out({ error: "bad holiday" }, 400);
       fn = "holiday_data"; body = JSON.stringify({ p_holiday: name, p_year: +year });
+      // The answer holiday_db.py stores after each hourly load (pricing.holiday_data run once, alone): one quick read instead of
+      // several 4 MB aggregations at once, which ran past Supabase's 8-second limit (11/24). Missing = ask the database below.
+      try {
+        const sr = await fetch(env.SUPABASE_URL.replace(/\/+$/, "") + "/storage/v1/object/pricing-page/holiday/" + name + "_" + year +
+                               ".json?t=" + Date.now(),
+                               { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: "Bearer " + env.SUPABASE_SERVICE_KEY } });
+        if (sr.ok) return new Response(sr.body, { headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=120" } });
+      } catch (e) { /* not stored: computed below */ }
     } else {
       fn = "holiday_list"; body = "{}";
     }
