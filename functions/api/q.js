@@ -79,17 +79,28 @@ export async function onRequestGet({ request, env }) {
     } else {
       fn = "holiday_list"; body = "{}";
     }
-    let r;
-    try {
-      r = await fetch(env.SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/rpc/" + fn, {
-        method: "POST", body,
-        headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: "Bearer " + env.SUPABASE_SERVICE_KEY,
-                   "Content-Type": "application/json", "Content-Profile": "pricing", "Accept-Profile": "pricing" },
-      });
-    } catch (e) {
-      return out({ error: "database unavailable" }, 502);
+    // 11/24: the first live open got a passing failure on the two big holidays (cold database, 3 at once): one retry, and the
+    // error answer says what the database returned (status + its short message; never data or keys).
+    let r = null, detail = "";
+    for (let k = 0; k < 2; k++) {
+      if (k) await new Promise((res) => setTimeout(res, 700));
+      try {
+        r = await fetch(env.SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/rpc/" + fn, {
+          method: "POST", body,
+          headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: "Bearer " + env.SUPABASE_SERVICE_KEY,
+                     "Content-Type": "application/json", "Content-Profile": "pricing", "Accept-Profile": "pricing" },
+        });
+      } catch (e) {
+        r = null; detail = "fetch: " + String((e && e.message) || e).slice(0, 80);
+        continue;
+      }
+      if (r.ok) break;
+      let msg = "";
+      try { msg = String((await r.json()).message || "").slice(0, 100); } catch (e) { msg = ""; }
+      detail = "db " + r.status + (msg ? ": " + msg : "");
+      if (r.status < 500) break;
     }
-    if (!r.ok) return out({ error: "database unavailable" }, 502);
+    if (!r || !r.ok) return out({ error: "database unavailable", detail }, 502);
     return new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=120" } });
   }
   return out({ error: "unknown query" }, 400);
