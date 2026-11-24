@@ -533,6 +533,7 @@ table.dt tbody tr:hover td{background:rgba(6,136,60,0.04);}
 #od-tip .dc-proj{font-size:11px;color:var(--text2);margin:1px 0 0;}
 #od-tip .dc-proj b.s{color:var(--bad);}
 #od-tip .dc-proj span{color:var(--text3);}
+#od-tip .dc-proj b.v{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--text);}
 #od-tip .dc-rows{display:grid;grid-template-columns:auto auto 1fr 84px auto;column-gap:6px;row-gap:3px;align-items:center;font-size:11px;margin-top:6px;}
 #od-tip .dc-t{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);white-space:nowrap;text-align:right;}
 #od-tip .dc-n{font-weight:600;color:var(--text);white-space:nowrap;}
@@ -6926,26 +6927,27 @@ function dlCompactHtml(sched,iso,D,entries,x){
   let r=null,lab='';
   if(x.hy&&x.hy.r>0){r=x.hy.r;lab='Holiday';}
   else if(x.pt&&x.pt.now&&x.pt.now.tix>0&&x.pt.now.proj>0){r=x.pt.now.proj/x.pt.now.tix;lab='Projected';}
+  // 2026-11-24 (Owen: "what is riders wanted by day ... kind of odd"): ONE line about the fullest stretch at departure: how that
+  // estimate moved over the last days (each day's tickets scaled to this stretch, today = the verdict's number) and the verdict.
   if(r&&iso>todayISO){
     let best=null;
     D.legs.forEach((L,i)=>{if(!L.seats)return;const w=Math.round(L.on*r),s=w-L.seats;if(!best||s>best.s)best={i:i,w:w,s:s,seats:L.seats};});
-    // over 1.5x the seats = the curve cell is thin this far out (or groups booked early): say "sells out", not a big number (as the older box)
-    const wild=lab==='Projected'&&best&&best.seats&&best.w>best.seats*1.5;   // a Holiday estimate over the seats is real demand: kept
-    if(best)h+='<div class="dc-proj">'+lab+': '+(wild?'<b class="s">sells out</b> on this pace '+nm(best.i)+' &rarr; '+nm(best.i+1)+' (estimate over 1.5x the seats: rough this far out)'
-      :best.s>0?'<b class="s">short '+best.s+' seat'+(best.s===1?'':'s')+'</b> '+nm(best.i)+' &rarr; '+nm(best.i+1)
-      :'fits &middot; fullest '+nm(best.i)+' &rarr; '+nm(best.i+1)+' about '+best.w+' of '+best.seats)+' <span>(x'+r.toFixed(2)+(tix<10?', few sales so far':'')+')</span></div>';
-  }
-  // 2026-11-24 (Owen): how the estimate has moved: each recent day's tickets x the ratio (a Holiday trip uses today's planner ratio)
-  if(iso>todayISO&&x.pt&&x.pt.pts&&x.pt.pts.length>=2){
-    const hol=!!(x.hy&&x.hy.r>0);
-    const raw=x.pt.pts.map(p=>hol?Math.round(p.tix*x.hy.r):p.proj);
-    const cap=x.pt.cap||run.reduce((s,b)=>s+(b.seats||0),0);
-    const top=(!hol&&cap)?Math.round(cap*1.5):Infinity;   // only the ordinary curve is capped (as the older box)
-    const d=Math.min(raw[raw.length-1],top)-Math.min(raw[0],top);
-    const arrow=' <span style="color:'+(d>0?'var(--good)':d<0?'var(--bad)':'var(--text3)')+'">'+(d>0?'&uarr;':d<0?'&darr;':'&mdash;')+'</span>';
-    if(raw.every(v=>v>top))h+='<div class="dc-trend">Final estimate by day: over '+top+' every day for '+cap+' seats (rough this far out)</div>';
-    else h+='<div class="dc-trend">'+(hol?'Riders wanted by day (holiday estimate): ':'Final estimate by day: ')+'<b>'+raw.map(v=>v>top?top+'+':String(v)).join(' &rarr; ')+'</b> (now)'
-      +(cap?' for '+cap+' seats':'')+arrow+'</div>';
+    if(best){
+      const hol=lab==='Holiday', on=D.legs[best.i].on;
+      // over 1.5x the seats on the ordinary curve = thin this far out (or groups booked early): "sells out", not a big number;
+      // a Holiday estimate over the seats is real demand vs last year: kept
+      const top=hol?Infinity:Math.round(best.seats*1.5);
+      const pts=(x.pt&&x.pt.pts)||[], tn=pts.length?(+pts[pts.length-1].tix||0):0;
+      let ser=(pts.length>=2&&tn>0)?pts.map(p=>Math.round(on*(hol?r*(+p.tix||0):(+p.proj||0))/tn)):[];
+      if(ser.length)ser[ser.length-1]=best.w;
+      const show=v=>v>top?top+'+':String(v), wild=best.w>top, allOver=ser.length>0&&ser.every(v=>v>top);
+      const d=ser.length?Math.min(ser[ser.length-1],top)-Math.min(ser[0],top):0;
+      const arrow=(ser.length&&!allOver)?' <span style="color:'+(d>0?'var(--good)':d<0?'var(--bad)':'var(--text3)')+'">'+(d>0?'&uarr;':d<0?'&darr;':'&mdash;')+'</span>':'';
+      h+='<div class="dc-proj">'+(hol?'Holiday estimate (vs last year)':'Projected')+', '+nm(best.i)+' &rarr; '+nm(best.i+1)+': '
+        +'<b class="v">'+(allOver?'over '+top+'</b> every day':ser.length?ser.map(show).join(' &rarr; ')+'</b> (now)':show(best.w)+'</b>')+' for '+best.seats+' seats'+arrow+' &middot; '
+        +(wild?'<b class="s">sells out</b> on this pace (rough this far out)':best.s>0?'<b class="s">short '+best.s+' seat'+(best.s===1?'':'s')+'</b>':'fits')
+        +' <span>(x'+r.toFixed(2)+(tix<10?', few sales so far':'')+')</span></div>';
+    }
   }
   // one row per stop + the bar for the stretch leaving it
   const starts={},ends={};
