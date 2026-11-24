@@ -76,7 +76,14 @@ export async function accessUser(request, env, now) {
   } catch (e) {
     return { status: 503, error: "sign-in keys unavailable" };
   }
-  const jwk = keys.find((k) => k.kid === head.kid);
+  let jwk = keys.find((k) => k.kid === head.kid);
+  if (!jwk) {   // 11/24 review: Access rotated its signing keys: read them again once instead of refusing for up to an hour
+    try {
+      KEYS.at = 0;
+      keys = await accessKeys(team);
+      jwk = keys.find((k) => k.kid === head.kid);
+    } catch (e) { /* refused below */ }
+  }
   if (!jwk) return { status: 401, error: "unknown key" };
   let ok = false;
   try {

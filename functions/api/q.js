@@ -18,6 +18,7 @@ import { accessUser } from "./data.js";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DAYS = 31, PAGE = 1000, MAX_ROWS = 20000;
+const STALE_MS = 150 * 60 * 1000;   // a stored Holiday answer older than 2.5 h is not served
 
 function out(obj, status, cache) {
   return new Response(JSON.stringify(obj), {
@@ -59,6 +60,16 @@ export async function onRequestGet({ request, env }) {
     if (!DAY.test(from) || !DAY.test(to)) return out({ error: "bad dates" }, 400);
     const n = days(from, to);
     if (!(n >= 1 && n <= MAX_DAYS)) return out({ error: "1 to " + MAX_DAYS + " days, from before to" }, 400);
+    // 11/24 review: one answer built in the database (pricing.trip_legs_span, migration 006), passed through unparsed (a 31-day
+    // span parsed here costs ~15 ms CPU, over the free plan's ~10 ms). Missing function / error = the paged way below.
+    try {
+      const rr = await fetch(env.SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/rpc/trip_legs_span", {
+        method: "POST", body: JSON.stringify({ p_from: from, p_to: to }),
+        headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: "Bearer " + env.SUPABASE_SERVICE_KEY,
+                   "Content-Type": "application/json", "Content-Profile": "pricing", "Accept-Profile": "pricing" },
+      });
+      if (rr.ok) return new Response(rr.body, { headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=300" } });
+    } catch (e) { /* the paged way */ }
     let list;
     try {
       list = await dbRows(env, "trip_legs", "select=dep_date,schedule,trip,read_at&dep_date=gte." + from + "&dep_date=lte." + to + "&order=dep_date,schedule");
@@ -84,7 +95,10 @@ export async function onRequestGet({ request, env }) {
         const sr = await fetch(env.SUPABASE_URL.replace(/\/+$/, "") + "/storage/v1/object/pricing-page/holiday/" + name + "_" + year +
                                ".json?t=" + Date.now(),
                                { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: "Bearer " + env.SUPABASE_SERVICE_KEY } });
-        if (sr.ok) return new Response(sr.body, { headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=120" } });
+        // 11/24 review: an answer older than STALE_MS means the hourly loader has been failing: ask the database instead
+        const lm = Date.parse(sr.headers.get("last-modified") || "");
+        if (sr.ok && (isNaN(lm) || Date.now() - lm < STALE_MS))
+          return new Response(sr.body, { headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=120" } });
       } catch (e) { /* not stored: computed below */ }
     } else {
       fn = "holiday_list"; body = "{}";
