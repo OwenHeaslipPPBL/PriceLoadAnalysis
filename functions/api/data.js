@@ -107,7 +107,8 @@ export async function onRequestGet({ request, env }) {
   const auth = { apikey: env.SUPABASE_SERVICE_KEY, Authorization: "Bearer " + env.SUPABASE_SERVICE_KEY };
 
   if (path === null) {
-    const r = await fetch(base + "index.json", { headers: auth });
+    // index.json is overwritten every hour and Supabase's CDN serves a cached copy despite no-cache: ask past the cache.
+    const r = await fetch(base + "index.json?t=" + Date.now(), { headers: auth });
     if (!r.ok) return json({ error: "no data yet" }, r.status === 400 || r.status === 404 ? 404 : 502);
     return new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
   }
